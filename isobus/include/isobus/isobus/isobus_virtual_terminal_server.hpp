@@ -17,6 +17,8 @@
 #include "isobus/isobus/isobus_virtual_terminal_server_managed_working_set.hpp"
 #include "isobus/utility/event_dispatcher.hpp"
 
+#include <array>
+
 namespace isobus
 {
 	/// @brief This class is an abstract VT server interface.
@@ -49,6 +51,15 @@ namespace isobus
 		/// @brief Returns a pointer to the currently active working set
 		/// @returns Pointer to the currently active working set, or nullptr if none is active
 		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> get_active_working_set() const;
+
+		/// @brief Builds the ISO 11783-6 G.5 VT Unsupported VT Function payload
+		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_vt_unsupported_function_message(std::uint8_t unsupportedFunction);
+
+		/// @brief Determines whether an unrecognized ECU-to-VT function requires a G.5 response
+		static bool should_send_vt_unsupported_function(VTVersion version,
+		                                                bool destinationSpecific,
+		                                                bool functionHandled,
+		                                                std::uint8_t receivedFunction);
 
 		/// @brief The Button Activation message allows the VT to transmit operator selection of a Button object to the Working
 		/// Set Master
@@ -561,7 +572,8 @@ namespace isobus
 		/// with whom we've established a working set master relationship
 		/// @param[in] message The CAN message being received
 		/// @param[in] managedWorkingSet The working set that is associated to the client sending the message
-		void process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+		/// @returns True if the function was recognized, otherwise false
+		bool process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
 
 		/// @brief Processes a CAN message from any VT client
 		/// @param[in] message The CAN message being received
@@ -575,6 +587,12 @@ namespace isobus
 		/// @param[in] destination The destination control function to send the acknowledgement to
 		/// @returns true if the message was sent, false otherwise
 		bool send_acknowledgement(AcknowledgementType type, std::uint32_t parameterGroupNumber, std::shared_ptr<InternalControlFunction> source, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends the VT Unsupported VT Function message defined by ISO 11783-6 G.5
+		/// @param[in] unsupportedFunction Function byte from the unsupported ECU-to-VT message
+		/// @param[in] destination The originating Working Set control function
+		/// @returns true if the message was sent, false otherwise
+		bool send_vt_unsupported_function(std::uint8_t unsupportedFunction, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a change active mask command
 		/// @param[in] newMaskObjectID The object ID for the new active mask

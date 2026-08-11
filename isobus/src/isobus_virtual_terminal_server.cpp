@@ -160,6 +160,29 @@ namespace isobus
 		return activeWorkingSet;
 	}
 
+	std::array<std::uint8_t, CAN_DATA_LENGTH> VirtualTerminalServer::make_vt_unsupported_function_message(std::uint8_t unsupportedFunction)
+	{
+		return {
+		  static_cast<std::uint8_t>(Function::UnsupportedVTFunctionMessage),
+		  unsupportedFunction,
+		  0xFF,
+		  0xFF,
+		  0xFF,
+		  0xFF,
+		  0xFF,
+		  0xFF
+		};
+	}
+
+	bool VirtualTerminalServer::should_send_vt_unsupported_function(VTVersion version,
+	                                                               bool destinationSpecific,
+	                                                               bool functionHandled,
+	                                                               std::uint8_t receivedFunction)
+	{
+		return (version >= VTVersion::Version5) && destinationSpecific && !functionHandled &&
+		       (receivedFunction != static_cast<std::uint8_t>(Function::UnsupportedVTFunctionMessage));
+	}
+
 	VirtualTerminalBase::GraphicMode VirtualTerminalServer::get_graphic_mode() const
 	{
 		return VirtualTerminalBase::GraphicMode::TwoHundredFiftySixColour;
@@ -512,9 +535,10 @@ namespace isobus
 		return retVal;
 	}
 
-	void VirtualTerminalServer::process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet)
+	bool VirtualTerminalServer::process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet)
 	{
 		const auto &data = message.get_data();
+		bool retVal = true;
 		switch (static_cast<Function>(data.at(0)))
 		{
 			case Function::GetMemoryMessage:
@@ -2020,8 +2044,10 @@ namespace isobus
 			break;
 
 			default:
+				retVal = false;
 				break;
 		}
+		return retVal;
 	}
 
 	void VirtualTerminalServer::process_rx_message(const CANMessage &message, void *parent)
@@ -2044,12 +2070,23 @@ namespace isobus
 				}
 				if (isManaged)
 				{
+					bool connectionMessageHandled = false;
 					for (const auto &cf : parentServer->managedWorkingSetList)
 					{
 						if (cf->get_control_function() == message.get_source_control_function())
 						{
-							parentServer->process_connection_dependent_messages(message, cf);
+							connectionMessageHandled = parentServer->process_connection_dependent_messages(message, cf);
 						}
+					}
+					const bool destinationSpecific =
+					  message.get_destination_control_function() == parentServer->serverInternalControlFunction;
+					if (parentServer->should_send_vt_unsupported_function(
+					      parentServer->get_version(),
+					      destinationSpecific,
+					      responseSent || connectionMessageHandled,
+					      message.get_uint8_at(0)))
+					{
+						parentServer->send_vt_unsupported_function(message.get_uint8_at(0), message.get_source_control_function());
 					}
 				}
 			}
@@ -2081,6 +2118,18 @@ namespace isobus
 			                                                        get_priority());
 		}
 		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_vt_unsupported_function(std::uint8_t unsupportedFunction, std::shared_ptr<ControlFunction> destination) const
+	{
+		const auto buffer = make_vt_unsupported_function_message(unsupportedFunction);
+		return CANNetworkManager::CANNetwork.send_can_message(
+		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+		  buffer.data(),
+		  buffer.size(),
+		  serverInternalControlFunction,
+		  destination,
+		  get_priority());
 	}
 
 	bool VirtualTerminalServer::send_change_active_mask_response(std::uint16_t newMaskObjectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
