@@ -2827,6 +2827,65 @@ namespace isobus
 		std::uint8_t endAngle = 0; ///< End angle / 2 in degrees from positive X axis counterclockwise
 	};
 
+	/// @brief Mutable pixel canvas controlled by Graphics Context commands.
+	class GraphicsContext : public VTObject
+	{
+	public:
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t, std::uint32_t &) const override;
+
+		std::uint16_t viewportWidth = 0, viewportHeight = 0;
+		std::int16_t viewportX = 0, viewportY = 0;
+		std::uint16_t canvasWidth = 0, canvasHeight = 0;
+		float viewportZoom = 1.0F;
+		std::int16_t cursorX = 0, cursorY = 0;
+		std::uint8_t foregroundColour = 1, backgroundColour = 0;
+		std::uint16_t fontAttributes = NULL_OBJECT_ID;
+		std::uint16_t lineAttributes = NULL_OBJECT_ID;
+		std::uint16_t fillAttributes = NULL_OBJECT_ID;
+		std::uint8_t options = 0, transparencyColour = 0;
+
+	private:
+		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 34;
+	};
+
+	/// @brief VT5 animation: displays one positioned child from a configurable sequence.
+	class Animation : public VTObject
+	{
+	public:
+		enum class AttributeName : std::uint8_t
+		{
+			Type = 0, Width, Height, RefreshInterval, Value, Enabled,
+			FirstChildIndex, LastChildIndex, DefaultChildIndex, Options,
+			NumberOfAttributes
+		};
+
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool) const override;
+		bool set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData,
+		                   const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool,
+		                   AttributeError &returnedError) override;
+		bool get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const override;
+		bool change_list_item(std::uint8_t index, std::uint16_t objectID,
+		                      const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool);
+		bool advance();
+
+		std::uint16_t refreshInterval = 0;
+		std::uint8_t value = 255;
+		bool enabled = false;
+		std::uint8_t firstChildIndex = 0;
+		std::uint8_t lastChildIndex = 0;
+		std::uint8_t defaultChildIndex = 0;
+		std::uint8_t options = 0;
+
+	private:
+		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 17;
+	};
+
 	/// @brief This object displays a picture graphic (bitmap)
 	class PictureGraphic : public VTObject
 	{
@@ -3578,16 +3637,18 @@ namespace isobus
 		/// @brief Sets the validation type setting for this object
 		/// @param[in] value The validation type
 		void set_validation_type(ValidationType value);
-
-		/// @todo Finish ExtendedInputAttributes implementation
+		bool add_character_range(std::uint8_t plane, std::uint16_t first,
+		                         std::uint16_t last);
+		bool is_character_allowed(std::uint32_t character) const;
+		std::size_t get_number_of_character_ranges(std::uint8_t plane) const;
 
 	private:
 		/// @brief Stores data for a code plane (for utf-16 strings)
 		class CodePlane
 		{
 		public:
-			std::vector<std::vector<wchar_t>> characterRanges; ///< A list of character ranges for this code plane
-			std::uint8_t numberOfCharacterRanges; ///< The number of expected character ranges for this code plane
+			bool present = false;
+			std::vector<std::pair<std::uint16_t, std::uint16_t>> characterRanges;
 		};
 		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 5; ///< The fewest bytes of IOP data that can represent this object
 
@@ -3658,6 +3719,47 @@ namespace isobus
 	private:
 		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 5; ///< The fewest bytes of IOP data that can represent this object
 		std::uint16_t value = NULL_OBJECT_ID; ///< Object ID of the object this object points to, or the NULL Object ID if the pointer should not be drawn
+	};
+
+	class ExternalObjectDefinition : public VTObject
+	{
+	public:
+		enum class AttributeName : std::uint8_t { Type = 0, Options = 1, NAME0 = 2, NAME1 = 3, NumberOfAttributes = 4 };
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t, std::uint32_t &) const override;
+		void set_enabled(bool value) { enabled = value; }
+		bool get_enabled() const { return enabled; }
+		void set_name(std::uint64_t value) { name = value; }
+		std::uint64_t get_name() const { return name; }
+		void add_object(std::uint16_t value) { objects.push_back(value); }
+		bool contains_object(std::uint16_t value) const;
+		bool change_object(std::uint8_t index, std::uint16_t value);
+		const std::vector<std::uint16_t> &get_objects() const { return objects; }
+	private:
+		bool enabled = false;
+		std::uint64_t name = 0;
+		std::vector<std::uint16_t> objects;
+	};
+
+	class ExternalReferenceNAME : public VTObject
+	{
+	public:
+		enum class AttributeName : std::uint8_t { Type = 0, Options = 1, NAME0 = 2, NAME1 = 3, NumberOfAttributes = 4 };
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t, std::uint32_t &) const override;
+		void set_enabled(bool value) { enabled = value; }
+		bool get_enabled() const { return enabled; }
+		void set_name(std::uint64_t value) { name = value; }
+		std::uint64_t get_name() const { return name; }
+	private:
+		bool enabled = false;
+		std::uint64_t name = 0;
 	};
 
 	/// @brief The External Object Pointer object, available in VT version 5 and later, allows a Working Set to display

@@ -99,7 +99,55 @@ namespace isobus
 
 	VTColourVector VirtualTerminalWorkingSetBase::get_colour(std::uint8_t colourIndex) const
 	{
-		return workingSetColourTable.get_colour(colourIndex);
+		std::uint8_t resolvedIndex = colourIndex;
+		if (NULL_OBJECT_ID != selectedColourMap)
+		{
+			auto object = vtObjectTree.find(selectedColourMap);
+			if ((vtObjectTree.end() != object) && object->second &&
+			    (VirtualTerminalObjectType::ColourMap == object->second->get_object_type()))
+			{
+				auto map = std::static_pointer_cast<ColourMap>(object->second);
+				if (colourIndex < map->get_number_of_colour_indexes())
+					resolvedIndex = map->get_colour_map_index(colourIndex);
+			}
+		}
+		return workingSetColourTable.get_colour(resolvedIndex);
+	}
+
+	bool VirtualTerminalWorkingSetBase::select_colour_map(std::uint16_t objectID)
+	{
+		if (NULL_OBJECT_ID == objectID)
+		{
+			selectedColourMap = NULL_OBJECT_ID;
+			return true;
+		}
+		auto object = vtObjectTree.find(objectID);
+		if ((vtObjectTree.end() == object) || !object->second ||
+		    (VirtualTerminalObjectType::ColourMap != object->second->get_object_type()) ||
+		    !object->second->get_is_valid(vtObjectTree))
+			return false;
+		selectedColourMap = objectID;
+		return true;
+	}
+
+	std::uint16_t VirtualTerminalWorkingSetBase::get_selected_colour_map() const
+	{
+		return selectedColourMap;
+	}
+
+	void VirtualTerminalWorkingSetBase::reset_external_objects()
+	{
+		for (auto &[id, object] : vtObjectTree)
+		{
+			(void)id;
+			if (!object) continue;
+			if (VirtualTerminalObjectType::ExternalObjectDefinition == object->get_object_type())
+				std::static_pointer_cast<ExternalObjectDefinition>(object)->set_enabled(false);
+			else if (VirtualTerminalObjectType::ExternalReferenceNAME == object->get_object_type())
+				std::static_pointer_cast<ExternalReferenceNAME>(object)->set_enabled(false);
+			else if (VirtualTerminalObjectType::ExternalObjectPointer == object->get_object_type())
+				std::static_pointer_cast<ExternalObjectPointer>(object)->set_external_object_id(NULL_OBJECT_ID);
+		}
 	}
 
 	const std::map<std::uint16_t, std::shared_ptr<VTObject>> &VirtualTerminalWorkingSetBase::get_object_tree() const
@@ -1400,13 +1448,67 @@ namespace isobus
 
 				case VirtualTerminalObjectType::GraphicsContext:
 				{
-					LOG_ERROR("[WS]: Graphics context not supported yet (todo)");
+					auto tempObject = std::make_shared<GraphicsContext>();
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						tempObject->set_id(decodedID);
+						tempObject->viewportWidth = get_little_endian_uint16(iopData, 3);
+						tempObject->viewportHeight = get_little_endian_uint16(iopData, 5);
+						tempObject->viewportX = get_little_endian_int16(iopData, 7);
+						tempObject->viewportY = get_little_endian_int16(iopData, 9);
+						tempObject->canvasWidth = get_little_endian_uint16(iopData, 11);
+						tempObject->canvasHeight = get_little_endian_uint16(iopData, 13);
+						const std::uint32_t zoomBits = get_little_endian_uint32(iopData, 15);
+						std::memcpy(&tempObject->viewportZoom, &zoomBits, sizeof(float));
+						tempObject->cursorX = get_little_endian_int16(iopData, 19);
+						tempObject->cursorY = get_little_endian_int16(iopData, 21);
+						tempObject->foregroundColour = iopData[23];
+						tempObject->backgroundColour = iopData[24];
+						tempObject->fontAttributes = get_little_endian_uint16(iopData, 25);
+						tempObject->lineAttributes = get_little_endian_uint16(iopData, 27);
+						tempObject->fillAttributes = get_little_endian_uint16(iopData, 29);
+						tempObject->options = iopData[31];
+						tempObject->transparencyColour = iopData[32];
+						const std::uint8_t macroCount = iopData[33];
+						iopData += tempObject->get_minumum_object_length();
+						iopLength -= tempObject->get_minumum_object_length();
+						retVal = parse_object_macro_reference(tempObject, macroCount, iopData, iopLength);
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse graphics context object");
+					}
+					if (retVal)
+						retVal = add_or_replace_object(tempObject);
 				}
 				break;
 
 				case VirtualTerminalObjectType::Animation:
 				{
-					LOG_ERROR("[WS]: Animation not supported yet (todo)");
+					auto object = std::make_shared<Animation>();
+					if (iopLength >= object->get_minumum_object_length())
+					{
+						object->set_id(decodedID);
+						object->set_width(get_little_endian_uint16(iopData, 3));
+						object->set_height(get_little_endian_uint16(iopData, 5));
+						object->refreshInterval = get_little_endian_uint16(iopData, 7);
+						object->value = iopData[9]; object->enabled = iopData[10] != 0;
+						object->firstChildIndex = iopData[11]; object->lastChildIndex = iopData[12];
+						object->defaultChildIndex = iopData[13]; object->options = iopData[14];
+						const auto count = iopData[15]; const auto macros = iopData[16];
+						if ((iopData[10] <= 1) && (iopData[14] <= 7))
+						{
+							iopData += object->get_minumum_object_length(); iopLength -= object->get_minumum_object_length(); retVal = true;
+							for (std::uint16_t n = 0; retVal && n < count; ++n)
+							{
+								if (iopLength < 6) { retVal = false; break; }
+								object->add_child(get_little_endian_uint16(iopData, 0), get_little_endian_int16(iopData, 2), get_little_endian_int16(iopData, 4));
+								iopData += 6; iopLength -= 6;
+							}
+							if (retVal) retVal = parse_object_macro_reference(object, macros, iopData, iopLength);
+						}
+					}
+					if (retVal) retVal = add_or_replace_object(object);
 				}
 				break;
 
@@ -1862,8 +1964,32 @@ namespace isobus
 						}
 
 						const std::uint8_t numberOfCodePlanesToFollow = iopData[4];
+						if ((0 == numberOfCodePlanesToFollow) || (numberOfCodePlanesToFollow > 17))
+							break;
 						tempObject->set_number_of_code_planes(numberOfCodePlanesToFollow);
-						LOG_ERROR("[WS]: Extended input attributes not supported yet (todo)");
+						iopData += 5;
+						iopLength -= 5;
+						retVal = true;
+						std::array<bool, 17> seenPlanes{};
+						for (std::uint8_t planeIndex = 0; planeIndex < numberOfCodePlanesToFollow; ++planeIndex)
+						{
+							if (iopLength < 2) { retVal = false; break; }
+							const std::uint8_t plane = iopData[0];
+							const std::uint8_t ranges = iopData[1];
+							if ((plane > 16) || seenPlanes[plane] || (0 == ranges) ||
+							    (iopLength < static_cast<std::uint32_t>(2 + ranges * 4)))
+							{ retVal = false; break; }
+							seenPlanes[plane] = true;
+							iopData += 2; iopLength -= 2;
+							for (std::uint16_t range = 0; range < ranges; ++range)
+							{
+								const auto first = get_little_endian_uint16(iopData, 0);
+								const auto last = get_little_endian_uint16(iopData, 2);
+								if (!tempObject->add_character_range(plane, first, last)) { retVal = false; break; }
+								iopData += 4; iopLength -= 4;
+							}
+							if (!retVal) break;
+						}
 					}
 					else
 					{
@@ -1889,6 +2015,11 @@ namespace isobus
 						    (16 == numberOfIndexes) ||
 						    (256 == numberOfIndexes))
 						{
+							if (iopLength < static_cast<std::uint32_t>(5 + numberOfIndexes))
+							{
+								LOG_ERROR("[WS]: Not enough IOP data for colour map indexes");
+								break;
+							}
 							tempObject->set_number_of_colour_indexes(numberOfIndexes);
 
 							for (std::uint_fast16_t i = 0; i < numberOfIndexes; i++)
@@ -1950,19 +2081,50 @@ namespace isobus
 
 				case VirtualTerminalObjectType::ExternalObjectDefinition:
 				{
-					LOG_ERROR("[WS]: External object definition not supported yet (todo)");
+					auto object = std::make_shared<ExternalObjectDefinition>();
+					if (iopLength >= 13)
+					{
+						const std::uint8_t count = iopData[12];
+						if ((iopData[3] <= 1) && (iopLength >= static_cast<std::uint32_t>(13 + count * 2)))
+						{
+							object->set_id(decodedID); object->set_enabled(0 != iopData[3]);
+							object->set_name(static_cast<std::uint64_t>(get_little_endian_uint32(iopData, 4)) |
+							                 (static_cast<std::uint64_t>(get_little_endian_uint32(iopData, 8)) << 32));
+							for (std::uint16_t index = 0; index < count; ++index)
+								object->add_object(get_little_endian_uint16(iopData, 13 + index * 2));
+							iopData += 13 + count * 2; iopLength -= 13 + count * 2;
+							retVal = add_or_replace_object(object);
+						}
+					}
 				}
 				break;
 
 				case VirtualTerminalObjectType::ExternalReferenceNAME:
 				{
-					LOG_ERROR("[WS]: External reference name not supported yet (todo)");
+					auto object = std::make_shared<ExternalReferenceNAME>();
+					if ((iopLength >= 12) && (iopData[3] <= 1))
+					{
+						object->set_id(decodedID); object->set_enabled(0 != iopData[3]);
+						object->set_name(static_cast<std::uint64_t>(get_little_endian_uint32(iopData, 4)) |
+						                 (static_cast<std::uint64_t>(get_little_endian_uint32(iopData, 8)) << 32));
+						iopData += 12; iopLength -= 12;
+						retVal = add_or_replace_object(object);
+					}
 				}
 				break;
 
 				case VirtualTerminalObjectType::ExternalObjectPointer:
 				{
-					LOG_ERROR("[WS]: External object pointer not supported yet (todo)");
+					auto object = std::make_shared<ExternalObjectPointer>();
+					if (iopLength >= 9)
+					{
+						object->set_id(decodedID);
+						object->set_default_object_id(get_little_endian_uint16(iopData, 3));
+						object->set_external_reference_name_id(get_little_endian_uint16(iopData, 5));
+						object->set_external_object_id(get_little_endian_uint16(iopData, 7));
+						iopData += 9; iopLength -= 9;
+						retVal = add_or_replace_object(object);
+					}
 				}
 				break;
 

@@ -778,17 +778,15 @@ namespace isobus
 							std::static_pointer_cast<ExternalObjectPointer>(lTargetObject)->set_external_reference_name_id(externalReferenceNAMEObjectIdD);
 							std::static_pointer_cast<ExternalObjectPointer>(lTargetObject)->set_external_object_id(referencedObjectID);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
-							// Todo: event dispatcher
+							onRepaintEventDispatcher.call(managedWorkingSet);
 						}
 						break;
 
 						case VirtualTerminalObjectType::Animation:
 						{
-							// Todo std::static_pointer_cast<Animation>(lTargetObject)->set_value(value);
-							// onChangeNumericValueEventDispatcher.call(objectId, value);
-							send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::AnyOtherError)), value, managedWorkingSet->get_control_function());
-							LOG_WARNING("[VT Server]: Client %u change numeric value for animation not implemented yet", managedWorkingSet->get_control_function()->get_address());
-							logSuccess = false;
+							std::static_pointer_cast<Animation>(lTargetObject)->value = static_cast<std::uint8_t>(value);
+							onRepaintEventDispatcher.call(managedWorkingSet);
+							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
 
@@ -892,6 +890,20 @@ namespace isobus
 							{
 								std::static_pointer_cast<Button>(lTargetObject)->set_option(Button::Options::Disabled, (0 == data[3]));
 								send_enable_disable_object_response(objectId, 0, (0 != data[3]), managedWorkingSet->get_control_function());
+								onRepaintEventDispatcher.call(managedWorkingSet);
+							}
+							break;
+
+							case VirtualTerminalObjectType::Animation:
+							{
+								auto animation = std::static_pointer_cast<Animation>(lTargetObject);
+								const bool wasEnabled = animation->enabled;
+								animation->enabled = (0 != data[3]);
+								if (animation->enabled && !wasEnabled)
+									animation->value = animation->firstChildIndex;
+								if (!animation->enabled && (((animation->options >> 1) & 0x03) == 1))
+									animation->value = animation->firstChildIndex;
+								send_enable_disable_object_response(objectId, 0, animation->enabled, managedWorkingSet->get_control_function());
 								onRepaintEventDispatcher.call(managedWorkingSet);
 							}
 							break;
@@ -1351,11 +1363,25 @@ namespace isobus
 							break;
 
 							case VirtualTerminalObjectType::Animation:
+							{
+								if (std::static_pointer_cast<Animation>(targetObject)->change_list_item(listIndex, newObjectID, managedWorkingSet->get_object_tree()))
+								{
+									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
+									onRepaintEventDispatcher.call(managedWorkingSet);
+								}
+								else send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::AnyOtherError)), listIndex, message.get_source_control_function());
+							}
+							break;
+
 							case VirtualTerminalObjectType::ExternalObjectDefinition:
 							{
-								// @todo
-								send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::AnyOtherError)), listIndex, message.get_source_control_function());
-								LOG_WARNING("[VT Server]: Client %u change list item command: TODO object type", managedWorkingSet->get_control_function()->get_address());
+								if (std::static_pointer_cast<ExternalObjectDefinition>(targetObject)->change_object(listIndex, newObjectID))
+								{
+									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
+									onRepaintEventDispatcher.call(managedWorkingSet);
+								}
+								else
+									send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::AnyOtherError)), listIndex, message.get_source_control_function());
 							}
 							break;
 

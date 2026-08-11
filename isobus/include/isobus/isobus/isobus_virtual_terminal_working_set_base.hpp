@@ -31,6 +31,9 @@ namespace isobus
 		/// @param[in] colourIndex The index into the VT's colour table to retrieve
 		/// @returns A colour from this working set's current colour table, by index
 		VTColourVector get_colour(std::uint8_t colourIndex) const;
+		bool select_colour_map(std::uint16_t objectID);
+		std::uint16_t get_selected_colour_map() const;
+		void reset_external_objects();
 
 		/// @brief Returns the working set's object tree
 		/// @returns The working set's object tree
@@ -112,6 +115,7 @@ namespace isobus
 		std::vector<std::vector<std::uint8_t>> iopFilesRawData; ///< Raw IOP File data from the client
 		std::uint16_t workingSetID = NULL_OBJECT_ID; ///< Stores the object ID of the working set object itself
 		std::uint16_t faultingObjectID = NULL_OBJECT_ID; ///< Stores the faulting object ID to send to a client when parsing the pool fails
+		std::uint16_t selectedColourMap = NULL_OBJECT_ID; ///< Active per-Working-Set colour remapping
 	};
 } // namespace isobus
 #endif // ISOBUS_VIRTUAL_TERMINAL_WORKING_SET_BASE_HPP

@@ -7,6 +7,8 @@
 /// @copyright 2023 The Open-Agriculture Developers
 //================================================================================================
 #include "isobus/isobus/isobus_virtual_terminal_objects.hpp"
+
+#include <cmath>
 #include "isobus/isobus/can_stack_logger.hpp"
 
 namespace isobus
@@ -5985,6 +5987,115 @@ namespace isobus
 		targetValueReference = value;
 	}
 
+	VirtualTerminalObjectType GraphicsContext::get_object_type() const
+	{
+		return VirtualTerminalObjectType::GraphicsContext;
+	}
+
+	VirtualTerminalObjectType Animation::get_object_type() const { return VirtualTerminalObjectType::Animation; }
+	std::uint32_t Animation::get_minumum_object_length() const { return MIN_OBJECT_LENGTH; }
+
+	bool Animation::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &pool) const
+	{
+		if ((NULL_OBJECT_ID == objectID) || (options > 7)) return false;
+		for (const auto &child : children)
+		{
+			if ((NULL_OBJECT_ID != child.id) && (nullptr == get_object_by_id(child.id, pool))) return false;
+		}
+		return true;
+	}
+
+	bool Animation::set_attribute(std::uint8_t aid, std::uint32_t raw,
+	                              const std::map<std::uint16_t, std::shared_ptr<VTObject>> &,
+	                              AttributeError &error)
+	{
+		if (aid >= static_cast<std::uint8_t>(AttributeName::NumberOfAttributes) || aid == 0)
+		{
+			error = AttributeError::InvalidAttributeID; return false;
+		}
+		switch (static_cast<AttributeName>(aid))
+		{
+			case AttributeName::Width: set_width(static_cast<std::uint16_t>(raw)); break;
+			case AttributeName::Height: set_height(static_cast<std::uint16_t>(raw)); break;
+			case AttributeName::RefreshInterval: refreshInterval = static_cast<std::uint16_t>(raw); break;
+			case AttributeName::Value: value = static_cast<std::uint8_t>(raw); break;
+			case AttributeName::Enabled: if (raw > 1) { error = AttributeError::InvalidValue; return false; } enabled = raw != 0; break;
+			case AttributeName::FirstChildIndex: firstChildIndex = static_cast<std::uint8_t>(raw); break;
+			case AttributeName::LastChildIndex: lastChildIndex = static_cast<std::uint8_t>(raw); break;
+			case AttributeName::DefaultChildIndex: defaultChildIndex = static_cast<std::uint8_t>(raw); break;
+			case AttributeName::Options: if (raw > 7) { error = AttributeError::InvalidValue; return false; } options = static_cast<std::uint8_t>(raw); break;
+			default: error = AttributeError::InvalidAttributeID; return false;
+		}
+		return true;
+	}
+
+	bool Animation::get_attribute(std::uint8_t aid, std::uint32_t &raw) const
+	{
+		switch (static_cast<AttributeName>(aid))
+		{
+			case AttributeName::Type: raw = 44; break;
+			case AttributeName::Width: raw = get_width(); break;
+			case AttributeName::Height: raw = get_height(); break;
+			case AttributeName::RefreshInterval: raw = refreshInterval; break;
+			case AttributeName::Value: raw = value; break;
+			case AttributeName::Enabled: raw = enabled; break;
+			case AttributeName::FirstChildIndex: raw = firstChildIndex; break;
+			case AttributeName::LastChildIndex: raw = lastChildIndex; break;
+			case AttributeName::DefaultChildIndex: raw = defaultChildIndex; break;
+			case AttributeName::Options: raw = options; break;
+			default: return false;
+		}
+		return true;
+	}
+
+	bool Animation::change_list_item(std::uint8_t index, std::uint16_t id,
+	                                const std::map<std::uint16_t, std::shared_ptr<VTObject>> &pool)
+	{
+		if ((index >= children.size()) || ((NULL_OBJECT_ID != id) && (nullptr == get_object_by_id(id, pool)))) return false;
+		children[index].id = id; return true;
+	}
+
+	bool Animation::advance()
+	{
+		if (!enabled || (0 == refreshInterval) || children.empty() ||
+		    (firstChildIndex > lastChildIndex) || (lastChildIndex >= children.size())) return false;
+		const auto previous = value;
+		if (value < firstChildIndex)
+			value = (firstChildIndex < lastChildIndex) ? static_cast<std::uint8_t>(firstChildIndex + 1) : firstChildIndex;
+		else if (value < lastChildIndex)
+			++value;
+		else if ((options & 0x01) != 0)
+			value = firstChildIndex;
+		else
+			value = lastChildIndex;
+		return value != previous;
+	}
+
+	std::uint32_t GraphicsContext::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool GraphicsContext::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		return (NULL_OBJECT_ID != objectID) && viewportWidth && viewportHeight &&
+		       canvasWidth && canvasHeight && std::isfinite(viewportZoom) &&
+		       (viewportZoom > 0.0F);
+	}
+
+	bool GraphicsContext::set_attribute(std::uint8_t, std::uint32_t,
+	                                    const std::map<std::uint16_t, std::shared_ptr<VTObject>> &,
+	                                    AttributeError &error)
+	{
+		error = AttributeError::InvalidAttributeID;
+		return false;
+	}
+
+	bool GraphicsContext::get_attribute(std::uint8_t, std::uint32_t &) const
+	{
+		return false;
+	}
+
 	VirtualTerminalObjectType PictureGraphic::get_object_type() const
 	{
 		return VirtualTerminalObjectType::PictureGraphic;
@@ -7002,6 +7113,12 @@ namespace isobus
 
 	bool ExtendedInputAttributes::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
 	{
+		if ((NULL_OBJECT_ID == objectID) || (0 == get_number_of_code_planes()) ||
+		    (get_number_of_code_planes() > 17))
+			return false;
+		for (const auto &plane : codePlanes)
+			if (plane.present && (plane.characterRanges.empty() || (plane.characterRanges.size() > 255)))
+				return false;
 		return true;
 	}
 
@@ -7045,12 +7162,14 @@ namespace isobus
 
 	std::uint8_t ExtendedInputAttributes::get_number_of_code_planes() const
 	{
-		return static_cast<std::uint8_t>(codePlanes.size());
+		return static_cast<std::uint8_t>(std::count_if(codePlanes.begin(), codePlanes.end(),
+		  [](const CodePlane &plane) { return plane.present; }));
 	}
 
 	void ExtendedInputAttributes::set_number_of_code_planes(std::uint8_t value)
 	{
-		codePlanes.resize(value);
+		codePlanes.clear();
+		codePlanes.reserve(value);
 	}
 
 	ExtendedInputAttributes::ValidationType ExtendedInputAttributes::get_validation_type() const
@@ -7061,6 +7180,91 @@ namespace isobus
 	void ExtendedInputAttributes::set_validation_type(ValidationType value)
 	{
 		validationType = value;
+	}
+
+	bool ExtendedInputAttributes::add_character_range(std::uint8_t plane,
+	                                                  std::uint16_t first,
+	                                                  std::uint16_t last)
+	{
+		if ((plane > 16) || (first > last))
+			return false;
+		if (codePlanes.size() <= plane)
+			codePlanes.resize(plane + 1);
+		codePlanes[plane].present = true;
+		if (codePlanes[plane].characterRanges.size() >= 255)
+			return false;
+		codePlanes[plane].characterRanges.emplace_back(first, last);
+		return true;
+	}
+
+	bool ExtendedInputAttributes::is_character_allowed(std::uint32_t character) const
+	{
+		const std::uint8_t plane = static_cast<std::uint8_t>(character >> 16);
+		const std::uint16_t value = static_cast<std::uint16_t>(character);
+		bool listed = false;
+		if (plane < codePlanes.size())
+			for (const auto &range : codePlanes[plane].characterRanges)
+				if ((value >= range.first) && (value <= range.second)) { listed = true; break; }
+		return ValidationType::ValidCharactersAreListed == validationType ? listed : !listed;
+	}
+
+	std::size_t ExtendedInputAttributes::get_number_of_character_ranges(std::uint8_t plane) const
+	{
+		return plane < codePlanes.size() ? codePlanes[plane].characterRanges.size() : 0;
+	}
+
+	VirtualTerminalObjectType ExternalObjectDefinition::get_object_type() const { return VirtualTerminalObjectType::ExternalObjectDefinition; }
+	std::uint32_t ExternalObjectDefinition::get_minumum_object_length() const { return 13; }
+	bool ExternalObjectDefinition::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const { return NULL_OBJECT_ID != objectID; }
+	bool ExternalObjectDefinition::contains_object(std::uint16_t value) const { return objects.end() != std::find(objects.begin(), objects.end(), value); }
+	bool ExternalObjectDefinition::change_object(std::uint8_t index, std::uint16_t value)
+	{
+		if (index >= objects.size()) return false;
+		objects[index] = value; return true;
+	}
+	bool ExternalObjectDefinition::set_attribute(std::uint8_t aid, std::uint32_t value, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &error)
+	{
+		switch (static_cast<AttributeName>(aid)) {
+			case AttributeName::Options: if (value > 1) break; enabled = value; return true;
+			case AttributeName::NAME0: name = (name & 0xFFFFFFFF00000000ULL) | value; return true;
+			case AttributeName::NAME1: name = (name & 0xFFFFFFFFULL) | (static_cast<std::uint64_t>(value) << 32); return true;
+			default: break;
+		}
+		error = AttributeError::InvalidValue; return false;
+	}
+	bool ExternalObjectDefinition::get_attribute(std::uint8_t aid, std::uint32_t &value) const
+	{
+		switch (static_cast<AttributeName>(aid)) {
+			case AttributeName::Type: value = 41; return true;
+			case AttributeName::Options: value = enabled; return true;
+			case AttributeName::NAME0: value = static_cast<std::uint32_t>(name); return true;
+			case AttributeName::NAME1: value = static_cast<std::uint32_t>(name >> 32); return true;
+			default: return false;
+		}
+	}
+
+	VirtualTerminalObjectType ExternalReferenceNAME::get_object_type() const { return VirtualTerminalObjectType::ExternalReferenceNAME; }
+	std::uint32_t ExternalReferenceNAME::get_minumum_object_length() const { return 12; }
+	bool ExternalReferenceNAME::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const { return NULL_OBJECT_ID != objectID; }
+	bool ExternalReferenceNAME::set_attribute(std::uint8_t aid, std::uint32_t value, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &error)
+	{
+		switch (static_cast<AttributeName>(aid)) {
+			case AttributeName::Options: if (value > 1) break; enabled = value; return true;
+			case AttributeName::NAME0: name = (name & 0xFFFFFFFF00000000ULL) | value; return true;
+			case AttributeName::NAME1: name = (name & 0xFFFFFFFFULL) | (static_cast<std::uint64_t>(value) << 32); return true;
+			default: break;
+		}
+		error = AttributeError::InvalidValue; return false;
+	}
+	bool ExternalReferenceNAME::get_attribute(std::uint8_t aid, std::uint32_t &value) const
+	{
+		switch (static_cast<AttributeName>(aid)) {
+			case AttributeName::Type: value = 42; return true;
+			case AttributeName::Options: value = enabled; return true;
+			case AttributeName::NAME0: value = static_cast<std::uint32_t>(name); return true;
+			case AttributeName::NAME1: value = static_cast<std::uint32_t>(name >> 32); return true;
+			default: return false;
+		}
 	}
 
 	VirtualTerminalObjectType ObjectPointer::get_object_type() const
@@ -7144,11 +7348,14 @@ namespace isobus
 
 	bool ExternalObjectPointer::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool) const
 	{
-		bool isDefaultObjectValid = (NULL_OBJECT_ID == get_default_object_id()) ||
-		  (nullptr != objectPool.at(get_default_object_id()));
-		bool isExternalNAMEIDValid = (NULL_OBJECT_ID == get_external_reference_name_id()) ||
-		  (nullptr != objectPool.at(get_external_reference_name_id()));
-		return (isDefaultObjectValid && isExternalNAMEIDValid);
+		const auto defaultObject = objectPool.find(get_default_object_id());
+		const auto reference = objectPool.find(get_external_reference_name_id());
+		const bool defaultValid = (NULL_OBJECT_ID == get_default_object_id()) ||
+		  ((objectPool.end() != defaultObject) && defaultObject->second);
+		const bool referenceValid = (NULL_OBJECT_ID == get_external_reference_name_id()) ||
+		  ((objectPool.end() != reference) && reference->second &&
+		   (VirtualTerminalObjectType::ExternalReferenceNAME == reference->second->get_object_type()));
+		return (NULL_OBJECT_ID != objectID) && defaultValid && referenceValid;
 	}
 
 	bool ExternalObjectPointer::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
@@ -7445,7 +7652,9 @@ namespace isobus
 
 	bool ColourMap::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
 	{
-		return true;
+		return (NULL_OBJECT_ID != objectID) &&
+		       ((2 == colourMapData.size()) || (16 == colourMapData.size()) ||
+		        (256 == colourMapData.size()));
 	}
 
 	bool ColourMap::set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
