@@ -15,6 +15,7 @@
 #include "isobus/utility/to_string.hpp"
 
 #include <iomanip>
+#include <set>
 #include <sstream>
 
 namespace isobus
@@ -82,6 +83,40 @@ namespace isobus
 		  (static_cast<std::uint32_t>(data[index + 1]) << 8) |
 		  (static_cast<std::uint32_t>(data[index + 2]) << 16) |
 		  (static_cast<std::uint32_t>(data[index + 3]) << 24);
+	}
+
+	static bool object_is_visible_from(std::uint16_t currentID, std::uint16_t targetID,
+	                                   const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet,
+	                                   std::set<std::uint16_t> &path)
+	{
+		if (currentID == targetID) return true;
+		if ((NULL_OBJECT_ID == currentID) || path.count(currentID)) return false;
+		const auto object = workingSet->get_object_by_id(currentID);
+		if (!object) return false;
+		if ((object->get_object_type() == VirtualTerminalObjectType::Container) &&
+		    std::static_pointer_cast<Container>(object)->get_hidden()) return false;
+		path.insert(currentID);
+		for (std::uint16_t index = 0; index < object->get_number_children(); ++index)
+			if (object_is_visible_from(object->get_child_id(index), targetID, workingSet, path)) { path.erase(currentID); return true; }
+		path.erase(currentID);
+		return false;
+	}
+
+	static bool object_is_on_active_mask(std::uint16_t targetID,
+	                                     const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet)
+	{
+		const auto root = workingSet->get_working_set_object();
+		if (!root || root->get_object_type() != VirtualTerminalObjectType::WorkingSet) return false;
+		const auto maskID = std::static_pointer_cast<WorkingSet>(root)->get_active_mask();
+		std::set<std::uint16_t> path;
+		if (object_is_visible_from(maskID, targetID, workingSet, path)) return true;
+		const auto mask = workingSet->get_object_by_id(maskID);
+		std::uint16_t softKeyMask = NULL_OBJECT_ID;
+		if (mask && mask->get_object_type() == VirtualTerminalObjectType::DataMask)
+			softKeyMask = std::static_pointer_cast<DataMask>(mask)->get_soft_key_mask();
+		else if (mask && mask->get_object_type() == VirtualTerminalObjectType::AlarmMask)
+			softKeyMask = std::static_pointer_cast<AlarmMask>(mask)->get_soft_key_mask();
+		return object_is_visible_from(softKeyMask, targetID, workingSet, path);
 	}
 
 	VirtualTerminalServer::VirtualTerminalServer(std::shared_ptr<InternalControlFunction> controlFunctionToUse) :
@@ -1644,10 +1679,41 @@ namespace isobus
 			case Function::SelectInputObjectCommand:
 			{
 				auto objectID = get_little_endian_uint16(data, 1);
+				if (NULL_OBJECT_ID == objectID)
+				{
+					if (0xFF == data[3])
+					{
+						managedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+						onFocusObjectEventDispatcher.call(managedWorkingSet, NULL_OBJECT_ID, false);
+						send_select_input_object_response(objectID, 0, SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
+					}
+					else send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::InvalidOptionValue)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
+					break;
+				}
 				auto targetObject = managedWorkingSet->get_object_by_id(objectID);
 
 				if (nullptr != targetObject)
 				{
+					bool disabled = false;
+					switch (targetObject->get_object_type())
+					{
+						case VirtualTerminalObjectType::Button: disabled = std::static_pointer_cast<Button>(targetObject)->get_option(Button::Options::Disabled); break;
+						case VirtualTerminalObjectType::InputBoolean: disabled = !std::static_pointer_cast<InputBoolean>(targetObject)->get_enabled(); break;
+						case VirtualTerminalObjectType::InputString: disabled = !std::static_pointer_cast<InputString>(targetObject)->get_enabled(); break;
+						case VirtualTerminalObjectType::InputList: disabled = !std::static_pointer_cast<InputList>(targetObject)->get_option(InputList::Options::Enabled); break;
+						case VirtualTerminalObjectType::InputNumber: disabled = !std::static_pointer_cast<InputNumber>(targetObject)->get_option2(InputNumber::Options2::Enabled); break;
+						default: break;
+					}
+					if (disabled)
+					{
+						send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::ObjectIsDisabled)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
+						break;
+					}
+					if (!object_is_on_active_mask(objectID, managedWorkingSet))
+					{
+						send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::ObjectIsNotOnTheActiveMaskOrIsInAHiddenContainer)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
+						break;
+					}
 					switch (targetObject->get_object_type())
 					{
 						case VirtualTerminalObjectType::Button:
@@ -1657,12 +1723,7 @@ namespace isobus
 							{
 								if (0 == data[3])
 								{
-									// 0 in Version 4+ means to activate the object for input
-									managedWorkingSet->set_object_focus(objectID);
-									LOG_DEBUG("[VT Server]: Client %u select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
-									onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, true);
-									send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsOpenedForEdit, message.get_source_control_function());
-									process_macro(targetObject, NULL_OBJECT_ID == objectID ? EventID::OnInputFieldDeselection : EventID::OnInputFieldSelection, targetObject->get_object_type(), managedWorkingSet);
+									send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::InvalidOptionValue)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
 								}
 								else if (0xFF == data[3])
 								{
@@ -1687,6 +1748,7 @@ namespace isobus
 						}
 						break;
 
+						case VirtualTerminalObjectType::InputBoolean:
 						case VirtualTerminalObjectType::InputNumber:
 						case VirtualTerminalObjectType::InputString:
 						case VirtualTerminalObjectType::InputList:
