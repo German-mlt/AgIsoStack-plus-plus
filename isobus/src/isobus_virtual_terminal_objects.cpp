@@ -4755,6 +4755,18 @@ namespace isobus
 		return retVal;
 	}
 
+	bool OutputPolygon::scale_points(std::uint16_t newWidth, std::uint16_t newHeight)
+	{
+		const std::uint16_t oldWidth = get_width(), oldHeight = get_height();
+		if ((0 == oldWidth) || (0 == oldHeight)) return false;
+		for (auto &point : pointList)
+		{
+			point.xValue = static_cast<std::uint16_t>((static_cast<std::uint32_t>(point.xValue) * newWidth + oldWidth / 2U) / oldWidth);
+			point.yValue = static_cast<std::uint16_t>((static_cast<std::uint32_t>(point.yValue) * newHeight + oldHeight / 2U) / oldHeight);
+		}
+		set_width(newWidth); set_height(newHeight); return true;
+	}
+
 	OutputPolygon::PolygonType OutputPolygon::get_type() const
 	{
 		return static_cast<PolygonType>(polygonType);

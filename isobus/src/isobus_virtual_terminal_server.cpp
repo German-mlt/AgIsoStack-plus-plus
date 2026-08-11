@@ -1818,6 +1818,38 @@ namespace isobus
 			}
 			break;
 
+			case Function::ChangeEndPointCommand:
+			{
+				const auto id = get_little_endian_uint16(data, 1);
+				const auto object = managedWorkingSet->get_object_by_id(id);
+				std::uint8_t error = 0;
+				if (!object || object->get_object_type() != VirtualTerminalObjectType::OutputLine) error = 0x01;
+				else if (data[7] > 1) error = 0x02;
+				else {
+					auto line = std::static_pointer_cast<OutputLine>(object);
+					line->set_width(get_little_endian_uint16(data, 3)); line->set_height(get_little_endian_uint16(data, 5));
+					line->set_line_direction(static_cast<OutputLine::LineDirection>(data[7]));
+					onRepaintEventDispatcher.call(managedWorkingSet);
+					process_macro(object, EventID::OnChangeEndpoint, object->get_object_type(), managedWorkingSet);
+				}
+				std::array<std::uint8_t, 8> response{static_cast<std::uint8_t>(Function::ChangeEndPointCommand), get_low_byte(id), get_high_byte(id), error, 0xFF, 0xFF, 0xFF, 0xFF};
+				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), response.data(), response.size(), serverInternalControlFunction, message.get_source_control_function(), get_priority());
+			}
+			break;
+
+			case Function::ChangePolygonScaleCommand:
+			{
+				const auto id = get_little_endian_uint16(data, 1), width = get_little_endian_uint16(data, 3), height = get_little_endian_uint16(data, 5);
+				const auto object = managedWorkingSet->get_object_by_id(id);
+				std::uint8_t error = 0;
+				if (!object || object->get_object_type() != VirtualTerminalObjectType::OutputPolygon) error = 0x01;
+				else if (!std::static_pointer_cast<OutputPolygon>(object)->scale_points(width, height)) error = 0x10;
+				else { onRepaintEventDispatcher.call(managedWorkingSet); process_macro(object, EventID::OnChangeSize, object->get_object_type(), managedWorkingSet); }
+				std::array<std::uint8_t, 8> response{static_cast<std::uint8_t>(Function::ChangePolygonScaleCommand), get_low_byte(id), get_high_byte(id), get_low_byte(width), get_high_byte(width), get_low_byte(height), get_high_byte(height), error};
+				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), response.data(), response.size(), serverInternalControlFunction, message.get_source_control_function(), get_priority());
+			}
+			break;
+
 			case Function::AuxiliaryInputTypeTwoMaintenanceMessage:
 			{
 				// Todo? auto modelIdentificationCode = static_cast<std::uint16_t>(static_cast<std::uint16_t>(data[1]) | (static_cast<std::uint16_t>(data[2]) << 8));

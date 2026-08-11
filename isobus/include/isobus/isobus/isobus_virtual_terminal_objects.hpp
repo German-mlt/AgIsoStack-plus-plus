@@ -2253,6 +2253,7 @@ namespace isobus
 		/// @param[in] y The new Y position of the point, relative to the top left corner of the polygon
 		/// @returns True if the point was modified, false if the index was out of range
 		bool change_point(std::uint8_t index, std::uint16_t x, std::uint16_t y);
+		bool scale_points(std::uint16_t newWidth, std::uint16_t newHeight);
 
 		/// @brief Returns the polygon type of this object
 		/// @returns The polygon type of this object
