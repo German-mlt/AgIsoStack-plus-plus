@@ -1911,7 +1911,7 @@ namespace isobus
 
 	bool VirtualTerminalClient::send_extended_get_versions() const
 	{
-		constexpr std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { static_cast<std::uint8_t>(Function::ExtendedDeleteVersionCommand),
+		constexpr std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { static_cast<std::uint8_t>(Function::ExtendedGetVersionsMessage),
 			                                                             0xFF,
 			                                                             0xFF,
 			                                                             0xFF,

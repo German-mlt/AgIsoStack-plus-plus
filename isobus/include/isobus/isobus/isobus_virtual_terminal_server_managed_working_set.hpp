@@ -94,6 +94,9 @@ namespace isobus
 		/// @param[in] value True if this pool was loaded via a Load Version Command, otherwise false (transferred normally)
 		void set_was_object_pool_loaded_from_non_volatile_memory(bool value, CANLibBadge<VirtualTerminalServer>);
 
+		std::uint8_t get_pending_load_version_response_function() const;
+		void set_pending_load_version_response_function(std::uint8_t value, CANLibBadge<VirtualTerminalServer>);
+
 		/// @brief Sets the object ID of the currently focused object
 		/// @param[in] objectID The object ID to set as the focused object
 		void set_object_focus(std::uint16_t objectID);
@@ -149,6 +152,7 @@ namespace isobus
 		std::uint32_t auxiliaryInputMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track if/when the working set sent an auxiliary input maintenance message
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
+		std::uint8_t pendingLoadVersionResponseFunction = 0; ///< D1 or D5 response to send after parsing
 		bool workingSetDeletionRequested = false; ///< Used to tell the server to delete this working set
 	};
 } // namespace isobus

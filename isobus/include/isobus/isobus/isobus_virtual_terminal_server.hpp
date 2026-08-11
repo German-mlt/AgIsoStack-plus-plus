@@ -61,6 +61,10 @@ namespace isobus
 		                                                bool functionHandled,
 		                                                std::uint8_t receivedFunction);
 
+		/// @brief Builds an E.13, E.15, or E.17 fixed-size response
+		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_extended_version_response(std::uint8_t function,
+		                                                                                 std::uint8_t errorCode);
+
 		/// @brief The Button Activation message allows the VT to transmit operator selection of a Button object to the Working
 		/// Set Master
 		/// @param[in] activationCode 0 for released, 1 for "pressed", 2 for "still held", or 3 for "aborted"
@@ -190,6 +194,9 @@ namespace isobus
 		/// @returns A vector of object pool versions available for the client
 		virtual std::vector<std::array<std::uint8_t, 7>> get_versions(NAME clientNAME) = 0;
 
+		/// @brief Returns the 32-byte extended version labels owned by a Working Set
+		virtual std::vector<std::array<std::uint8_t, 32>> get_extended_versions(NAME clientNAME) = 0;
+
 		/// @brief This function is called when the interface needs to know what objects are supported by the server.
 		/// @returns A vector of supported objects
 		virtual std::vector<std::uint8_t> get_supported_objects() const = 0;
@@ -227,6 +234,9 @@ namespace isobus
 		/// @param[in] clientNAME The NAME of the client that is requesting deletion
 		/// @returns True if all relevant object pools were deleted from VT non-volatile storage, otherwise false.
 		virtual bool delete_all_versions(NAME clientNAME) = 0;
+
+		/// @brief Deletes all 32-byte extended versions owned by a Working Set
+		virtual bool delete_all_extended_versions(NAME clientNAME) = 0;
 
 		/// @brief This function is called when the client wants the server to deactivate its object pool.
 		/// You should treat this as a disconnection by the client, as it may be moving to another VT.
@@ -593,6 +603,9 @@ namespace isobus
 		/// @param[in] destination The originating Working Set control function
 		/// @returns true if the message was sent, false otherwise
 		bool send_vt_unsupported_function(std::uint8_t unsupportedFunction, std::shared_ptr<ControlFunction> destination) const;
+		bool send_extended_version_response(std::uint8_t function,
+		                                    std::uint8_t errorCode,
+		                                    std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a change active mask command
 		/// @param[in] newMaskObjectID The object ID for the new active mask
