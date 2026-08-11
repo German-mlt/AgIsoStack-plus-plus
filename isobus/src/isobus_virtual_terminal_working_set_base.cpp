@@ -2051,7 +2051,26 @@ namespace isobus
 
 				case VirtualTerminalObjectType::ObjectLabelRefrenceList:
 				{
-					LOG_ERROR("[WS]: Object label reference not supported yet (todo)");
+					auto object = std::make_shared<ObjectLabelReferenceList>();
+					if (iopLength >= object->get_minumum_object_length())
+					{
+						const auto count = get_little_endian_uint16(iopData, 3);
+						const std::uint32_t length = 5U + static_cast<std::uint32_t>(count) * 7U;
+						if (iopLength >= length)
+						{
+							object->set_id(decodedID); retVal = true;
+							for (std::uint32_t index = 0; retVal && index < count; ++index)
+							{
+								const auto offset = 5U + index * 7U;
+								retVal = object->add_label({get_little_endian_uint16(iopData, offset), get_little_endian_uint16(iopData, offset + 2), iopData[offset + 4], get_little_endian_uint16(iopData, offset + 5)});
+							}
+							if (retVal) {
+								for (const auto &entry : vtObjectTree)
+									if (entry.second && entry.second->get_object_type() == VirtualTerminalObjectType::ObjectLabelRefrenceList && entry.first != decodedID) { retVal = false; break; }
+							}
+							if (retVal) { iopData += length; iopLength -= length; retVal = add_or_replace_object(object); }
+						}
+					}
 				}
 				break;
 

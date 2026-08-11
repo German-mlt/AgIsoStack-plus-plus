@@ -3744,6 +3744,24 @@ namespace isobus
 		std::vector<std::uint16_t> objects;
 	};
 
+	class ObjectLabelReferenceList : public VTObject
+	{
+	public:
+		struct Label { std::uint16_t objectID = NULL_OBJECT_ID; std::uint16_t stringVariableID = NULL_OBJECT_ID; std::uint8_t fontType = 0; std::uint16_t graphicID = NULL_OBJECT_ID; };
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &pool) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t attributeID, std::uint32_t &value) const override;
+		bool add_label(const Label &label);
+		bool change_label(std::uint16_t objectID, std::uint16_t stringVariableID, std::uint8_t fontType, std::uint16_t graphicID);
+		const Label *get_label(std::uint16_t objectID) const;
+		const std::vector<Label> &get_labels() const { return labels; }
+	private:
+		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 5;
+		std::vector<Label> labels;
+	};
+
 	class ExternalReferenceNAME : public VTObject
 	{
 	public:

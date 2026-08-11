@@ -1733,6 +1733,29 @@ namespace isobus
 			}
 			break;
 
+			case Function::ChangeObjectLabelCommand:
+			{
+				const auto labelledObjectID = get_little_endian_uint16(data, 1);
+				const auto stringVariableID = get_little_endian_uint16(data, 3);
+				const auto fontType = data[5];
+				const auto graphicID = get_little_endian_uint16(data, 6);
+				std::shared_ptr<ObjectLabelReferenceList> labels;
+				for (const auto &entry : managedWorkingSet->get_object_tree())
+					if (entry.second && entry.second->get_object_type() == VirtualTerminalObjectType::ObjectLabelRefrenceList)
+					{ labels = std::static_pointer_cast<ObjectLabelReferenceList>(entry.second); break; }
+				std::uint8_t error = 0;
+				if (!labels) error |= 0x08;
+				else if (!labels->get_label(labelledObjectID)) error |= 0x01;
+				const auto stringObject = managedWorkingSet->get_object_by_id(stringVariableID);
+				if ((NULL_OBJECT_ID != stringVariableID) && (!stringObject || stringObject->get_object_type() != VirtualTerminalObjectType::StringVariable)) error |= 0x02;
+				if (!((fontType <= 2) || fontType == 4 || fontType == 5 || fontType == 7)) error |= 0x04;
+				if ((NULL_OBJECT_ID != graphicID) && !managedWorkingSet->get_object_by_id(graphicID)) error |= 0x10;
+				if ((0 == error) && !labels->change_label(labelledObjectID, stringVariableID, fontType, graphicID)) error |= 0x20;
+				std::array<std::uint8_t, CAN_DATA_LENGTH> response{static_cast<std::uint8_t>(Function::ChangeObjectLabelCommand), error, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), response.data(), response.size(), serverInternalControlFunction, message.get_source_control_function(), get_priority());
+			}
+			break;
+
 			case Function::AuxiliaryInputTypeTwoMaintenanceMessage:
 			{
 				// Todo? auto modelIdentificationCode = static_cast<std::uint16_t>(static_cast<std::uint16_t>(data[1]) | (static_cast<std::uint16_t>(data[2]) << 8));

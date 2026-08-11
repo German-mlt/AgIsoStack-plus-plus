@@ -5992,6 +5992,43 @@ namespace isobus
 		return VirtualTerminalObjectType::GraphicsContext;
 	}
 
+	VirtualTerminalObjectType ObjectLabelReferenceList::get_object_type() const { return VirtualTerminalObjectType::ObjectLabelRefrenceList; }
+	std::uint32_t ObjectLabelReferenceList::get_minumum_object_length() const { return MIN_OBJECT_LENGTH; }
+	bool ObjectLabelReferenceList::add_label(const Label &label)
+	{
+		if ((NULL_OBJECT_ID == label.objectID) || (nullptr != get_label(label.objectID))) return false;
+		labels.push_back(label); return true;
+	}
+	const ObjectLabelReferenceList::Label *ObjectLabelReferenceList::get_label(std::uint16_t id) const
+	{
+		for (const auto &label : labels) if (label.objectID == id) return &label;
+		return nullptr;
+	}
+	bool ObjectLabelReferenceList::change_label(std::uint16_t id, std::uint16_t stringID, std::uint8_t font, std::uint16_t graphicID)
+	{
+		for (auto &label : labels) if (label.objectID == id) { label.stringVariableID = stringID; label.fontType = font; label.graphicID = graphicID; return true; }
+		return false;
+	}
+	bool ObjectLabelReferenceList::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &pool) const
+	{
+		if (NULL_OBJECT_ID == objectID) return false;
+		for (const auto &label : labels)
+		{
+			if (nullptr == get_object_by_id(label.objectID, pool)) return false;
+			const auto stringObject = get_object_by_id(label.stringVariableID, pool);
+			if ((NULL_OBJECT_ID != label.stringVariableID) && (!stringObject || stringObject->get_object_type() != VirtualTerminalObjectType::StringVariable)) return false;
+			if ((NULL_OBJECT_ID != label.graphicID) && (nullptr == get_object_by_id(label.graphicID, pool))) return false;
+		}
+		return true;
+	}
+	bool ObjectLabelReferenceList::set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &error) { error = AttributeError::InvalidAttributeID; return false; }
+	bool ObjectLabelReferenceList::get_attribute(std::uint8_t aid, std::uint32_t &value) const
+	{
+		if (aid == 0) { value = static_cast<std::uint8_t>(get_object_type()); return true; }
+		if (aid == 1) { value = static_cast<std::uint32_t>(labels.size()); return true; }
+		return false;
+	}
+
 	VirtualTerminalObjectType Animation::get_object_type() const { return VirtualTerminalObjectType::Animation; }
 	std::uint32_t Animation::get_minumum_object_length() const { return MIN_OBJECT_LENGTH; }
 
