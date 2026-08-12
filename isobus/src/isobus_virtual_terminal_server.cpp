@@ -436,7 +436,7 @@ namespace isobus
 		const auto &data = message.get_data();
 		switch (static_cast<Function>(data.at(0)))
 		{
-			case Function::GetMemoryMessage:
+		case Function::GetMemoryMessage:
 			{
 				const auto requiredMemory = get_little_endian_uint32(data, 2);
 				bool isEnoughMemory = get_is_enough_memory(requiredMemory);
@@ -466,6 +466,13 @@ namespace isobus
 				                                               serverInternalControlFunction,
 				                                               message.get_source_control_function(),
 				                                               get_priority());
+				retVal = true;
+			}
+			break;
+
+			case Function::AuxiliaryCapabilitiesRequest:
+			{
+				send_auxiliary_capabilities_response(data[1], message.get_source_control_function());
 				retVal = true;
 			}
 			break;
@@ -3253,6 +3260,70 @@ namespace isobus
 		                                                      serverInternalControlFunction,
 		                                                      destination,
 		                                                      get_priority());
+	}
+
+	bool VirtualTerminalServer::send_auxiliary_capabilities_response(std::uint8_t requestType, std::shared_ptr<ControlFunction> destination) const
+	{
+		std::vector<AuxiliaryCapabilitiesUnit> units;
+		if (requestType <= 1)
+		{
+			const auto requestedType = (0 == requestType)
+			  ? VirtualTerminalObjectType::AuxiliaryInputType2
+			  : VirtualTerminalObjectType::AuxiliaryFunctionType2;
+			for (const auto &workingSet : managedWorkingSetList)
+			{
+				if (nullptr == workingSet->get_working_set_object())
+					continue;
+				std::map<std::uint8_t, std::uint8_t> sets;
+				for (const auto &entry : workingSet->get_object_tree())
+				{
+					if ((nullptr == entry.second) || (requestedType != entry.second->get_object_type()))
+						continue;
+					std::uint32_t attributes = 0;
+					if (entry.second->get_attribute(2, attributes))
+					{
+						auto &count = sets[static_cast<std::uint8_t>(attributes)];
+						if (count < 0xFF)
+							++count;
+					}
+				}
+				if (sets.empty() || (units.size() == 0xFF))
+					continue;
+				units.push_back({ workingSet->get_control_function()->get_NAME().get_full_name(), std::move(sets) });
+			}
+		}
+		auto buffer = make_auxiliary_capabilities_response(requestType, units);
+		return CANNetworkManager::CANNetwork.send_can_message(
+		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+		  buffer.data(), buffer.size(), serverInternalControlFunction, destination, get_priority());
+	}
+
+	std::vector<std::uint8_t> VirtualTerminalServer::make_auxiliary_capabilities_response(
+	  std::uint8_t requestType, const std::vector<AuxiliaryCapabilitiesUnit> &units)
+	{
+		std::vector<std::uint8_t> buffer = {
+		  static_cast<std::uint8_t>(Function::AuxiliaryCapabilitiesRequest), 0
+		};
+		if (requestType > 1)
+			return buffer;
+		buffer[1] = static_cast<std::uint8_t>(std::min<std::size_t>(units.size(), 0xFF));
+		for (std::size_t index = 0; index < buffer[1]; ++index)
+		{
+			const auto &unit = units[index];
+			for (std::uint8_t byte = 0; byte < 8; ++byte)
+				buffer.push_back(static_cast<std::uint8_t>(unit.name >> (8 * byte)));
+			buffer.push_back(static_cast<std::uint8_t>(std::min<std::size_t>(unit.sets.size(), 0xFF)));
+			std::size_t setIndex = 0;
+			for (const auto &set : unit.sets)
+			{
+				if (setIndex++ == 0xFF)
+					break;
+				buffer.push_back(set.second);
+				buffer.push_back(set.first);
+				buffer.push_back(requestType);
+			}
+		}
+		return buffer;
 	}
 
 	bool VirtualTerminalServer::send_capture_screen_response(std::uint8_t item, std::uint8_t path, std::uint8_t errorCode, std::uint16_t imageId, std::shared_ptr<ControlFunction> requestor) const

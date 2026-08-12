@@ -67,6 +67,13 @@ namespace isobus
 		static bool should_route_response_to_originator(VTVersion vtVersion,
 		                                                std::uint8_t workingSetVersion);
 		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_identify_vt_response();
+		struct AuxiliaryCapabilitiesUnit
+		{
+			std::uint64_t name = 0;
+			std::map<std::uint8_t, std::uint8_t> sets;
+		};
+		static std::vector<std::uint8_t> make_auxiliary_capabilities_response(
+		  std::uint8_t requestType, const std::vector<AuxiliaryCapabilitiesUnit> &units);
 
 		/// @brief The Button Activation message allows the VT to transmit operator selection of a Button object to the Working
 		/// Set Master
@@ -815,6 +822,7 @@ namespace isobus
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false.
 		bool send_audio_volume_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
+		bool send_auxiliary_capabilities_response(std::uint8_t requestType, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response message to the Screen capture command
 		/// @param[in] item Item requested from the Screen Capture command
