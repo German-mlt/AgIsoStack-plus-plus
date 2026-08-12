@@ -4093,6 +4093,22 @@ namespace isobus
 		std::vector<VTColourVector> colours;
 	};
 
+	/// @brief VT6 PNG graphic payload (ISO 11783-6 B.27).
+	class GraphicData : public VTObject
+	{
+	public:
+		enum class AttributeName : std::uint8_t { Type = 0, Format = 1, NumberOfAttributes = 2 };
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t, std::uint32_t &) const override;
+		void set_raw_data(std::vector<std::uint8_t> value);
+		const std::vector<std::uint8_t> &get_raw_data() const;
+	private:
+		std::vector<std::uint8_t> rawData;
+	};
+
 	/// @brief Defines a window mask object
 	class WindowMask : public VTObject
 	{

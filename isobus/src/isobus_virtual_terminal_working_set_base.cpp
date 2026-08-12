@@ -2097,6 +2097,23 @@ namespace isobus
 				}
 				break;
 
+			case VirtualTerminalObjectType::GraphicData:
+				{
+					auto object = std::make_shared<GraphicData>();
+					if (iopLength >= object->get_minumum_object_length() && (0 == iopData[3]))
+					{
+						const std::uint32_t count = get_little_endian_uint32(iopData, 4);
+						if (count <= (iopLength - 8U))
+						{
+							object->set_id(decodedID);
+							object->set_raw_data(std::vector<std::uint8_t>(iopData + 8, iopData + 8 + count));
+							iopData += 8U + count; iopLength -= 8U + count;
+							retVal = add_or_replace_object(object);
+						}
+					}
+				}
+				break;
+
 				case VirtualTerminalObjectType::ObjectLabelRefrenceList:
 				{
 					auto object = std::make_shared<ObjectLabelReferenceList>();

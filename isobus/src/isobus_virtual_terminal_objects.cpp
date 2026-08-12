@@ -7821,6 +7821,29 @@ namespace isobus
 		return index < colours.size() ? colours[index] : VTColourVector();
 	}
 
+	VirtualTerminalObjectType GraphicData::get_object_type() const { return VirtualTerminalObjectType::GraphicData; }
+	std::uint32_t GraphicData::get_minumum_object_length() const { return 8; }
+	bool GraphicData::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		return NULL_OBJECT_ID != objectID;
+	}
+	bool GraphicData::set_attribute(std::uint8_t, std::uint32_t,
+	                               const std::map<std::uint16_t, std::shared_ptr<VTObject>> &,
+	                               AttributeError &error)
+	{
+		error = AttributeError::InvalidAttributeID;
+		return false;
+	}
+	bool GraphicData::get_attribute(std::uint8_t attributeID, std::uint32_t &raw) const
+	{
+		if (attributeID == static_cast<std::uint8_t>(AttributeName::Type)) raw = static_cast<std::uint8_t>(get_object_type());
+		else if (attributeID == static_cast<std::uint8_t>(AttributeName::Format)) raw = 0;
+		else return false;
+		return true;
+	}
+	void GraphicData::set_raw_data(std::vector<std::uint8_t> value) { rawData = std::move(value); }
+	const std::vector<std::uint8_t> &GraphicData::get_raw_data() const { return rawData; }
+
 	VirtualTerminalObjectType WindowMask::get_object_type() const
 	{
 		return VirtualTerminalObjectType::WindowMask;
