@@ -68,6 +68,14 @@ namespace isobus
 		/// @brief Returns the control function that is the working set master
 		/// @returns The control function that is the working set master
 		std::shared_ptr<ControlFunction> get_control_function() const;
+		bool is_master(const std::shared_ptr<ControlFunction> &controlFunction) const;
+		bool contains_control_function(const std::shared_ptr<ControlFunction> &controlFunction) const;
+		void configure_members(std::uint8_t totalMemberCount);
+		bool add_member(NAME memberName);
+		std::uint8_t get_expected_member_count() const;
+		const std::vector<NAME> &get_member_names() const;
+		void set_version(std::uint8_t value);
+		std::uint8_t get_version() const;
 
 		/// @brief Returns the working set maintenance message timestamp
 		/// @returns The working set maintenance message timestamp in milliseconds
@@ -146,6 +154,9 @@ namespace isobus
 
 		std::unique_ptr<std::thread> objectPoolProcessingThread = nullptr; ///< A thread to process the object pool with, since that can be fairly time consuming.
 		std::shared_ptr<ControlFunction> workingSetControlFunction = nullptr; ///< Stores the control function associated with this working set
+		std::vector<NAME> memberNames;
+		std::uint8_t expectedMemberCount = 1;
+		std::uint8_t workingSetVersion = 0;
 		std::vector<isobus::EventCallbackHandle> callbackHandles; ///< A convenient way to associate callback handles to a working set
 		ObjectPoolProcessingThreadState processingState = ObjectPoolProcessingThreadState::None; ///< Stores the state of processing the object pool
 		std::uint32_t workingSetMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track sending of the maintenance message

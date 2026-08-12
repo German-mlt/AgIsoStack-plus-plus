@@ -12,6 +12,7 @@
 #include "isobus/isobus/can_stack_logger.hpp"
 #include "isobus/utility/to_string.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 namespace isobus
@@ -67,6 +68,37 @@ namespace isobus
 	{
 		return workingSetControlFunction;
 	}
+
+	bool VirtualTerminalServerManagedWorkingSet::is_master(const std::shared_ptr<ControlFunction> &controlFunction) const
+	{
+		return controlFunction && workingSetControlFunction &&
+		       controlFunction->get_NAME() == workingSetControlFunction->get_NAME();
+	}
+
+	bool VirtualTerminalServerManagedWorkingSet::contains_control_function(const std::shared_ptr<ControlFunction> &controlFunction) const
+	{
+		if (is_master(controlFunction)) return true;
+		return controlFunction && std::find(memberNames.begin(), memberNames.end(), controlFunction->get_NAME()) != memberNames.end();
+	}
+
+	void VirtualTerminalServerManagedWorkingSet::configure_members(std::uint8_t totalMemberCount)
+	{
+		expectedMemberCount = totalMemberCount;
+		memberNames.clear();
+	}
+
+	bool VirtualTerminalServerManagedWorkingSet::add_member(NAME memberName)
+	{
+		if ((memberNames.size() + 1 >= expectedMemberCount) ||
+		    (std::find(memberNames.begin(), memberNames.end(), memberName) != memberNames.end())) return false;
+		memberNames.push_back(memberName);
+		return true;
+	}
+
+	std::uint8_t VirtualTerminalServerManagedWorkingSet::get_expected_member_count() const { return expectedMemberCount; }
+	const std::vector<NAME> &VirtualTerminalServerManagedWorkingSet::get_member_names() const { return memberNames; }
+	void VirtualTerminalServerManagedWorkingSet::set_version(std::uint8_t value) { workingSetVersion = value; }
+	std::uint8_t VirtualTerminalServerManagedWorkingSet::get_version() const { return workingSetVersion; }
 
 	std::uint32_t VirtualTerminalServerManagedWorkingSet::get_working_set_maintenance_message_timestamp_ms() const
 	{

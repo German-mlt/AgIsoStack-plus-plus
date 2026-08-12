@@ -64,6 +64,8 @@ namespace isobus
 		/// @brief Builds an E.13, E.15, or E.17 fixed-size response
 		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_extended_version_response(std::uint8_t function,
 		                                                                                 std::uint8_t errorCode);
+		static bool should_route_response_to_originator(VTVersion vtVersion,
+		                                                std::uint8_t workingSetVersion);
 
 		/// @brief The Button Activation message allows the VT to transmit operator selection of a Button object to the Working
 		/// Set Master
@@ -589,6 +591,8 @@ namespace isobus
 		/// @param[in] message The CAN message being received
 		/// @param[in] parent A context variable to find the relevant VT server class
 		static void process_rx_message(const CANMessage &message, void *parent);
+		static void process_working_set_message(const CANMessage &message, void *parent);
+		static bool is_working_set_master_only_function(Function function);
 
 		/// @brief Sends a message using the acknowledgement PGN
 		/// @param[in] type The type of acknowledgement to send (Ack, vs Nack, etc)
