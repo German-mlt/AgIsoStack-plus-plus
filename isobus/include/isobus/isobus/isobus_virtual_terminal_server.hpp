@@ -362,6 +362,9 @@ namespace isobus
 		LanguageCommandInterface &get_language_command_interface();
 
 	protected:
+		virtual void on_colour_table_changed(
+		  std::shared_ptr<VirtualTerminalServerManagedWorkingSet>,
+		  const std::array<VTColourVector, 256> &) {}
 		/// @brief Enumerates the bit indices of the error fields that can be set in a change active mask response
 		enum class ChangeActiveMaskErrorBit : std::uint8_t
 		{

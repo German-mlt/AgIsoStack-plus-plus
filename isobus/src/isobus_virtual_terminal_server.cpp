@@ -2188,6 +2188,32 @@ namespace isobus
 			}
 			break;
 
+			case Function::SelectColourMapCommand:
+			{
+				const auto objectID = get_little_endian_uint16(data, 1);
+				std::uint8_t error = 0;
+				auto object = managedWorkingSet->get_object_by_id(objectID);
+				if ((NULL_OBJECT_ID != objectID) && !object) error = 0x01;
+				else if (object && (VirtualTerminalObjectType::ColourMap != object->get_object_type()) &&
+				         (VirtualTerminalObjectType::ColourPalette != object->get_object_type())) error = 0x02;
+				else
+				{
+					std::array<VTColourVector, 256> oldColours;
+					for (std::uint16_t i = 0; i < 256; ++i) oldColours[i] = managedWorkingSet->get_colour(static_cast<std::uint8_t>(i));
+					const bool palette = object && (VirtualTerminalObjectType::ColourPalette == object->get_object_type());
+					const bool selected = palette ? managedWorkingSet->select_colour_palette(objectID) :
+					  (NULL_OBJECT_ID == objectID ? (managedWorkingSet->select_colour_map(objectID) && managedWorkingSet->select_colour_palette(objectID)) :
+					                                managedWorkingSet->select_colour_map(objectID));
+					if (!selected) error = 0x04;
+					else { on_colour_table_changed(managedWorkingSet, oldColours); onRepaintEventDispatcher.call(managedWorkingSet); }
+				}
+				const std::array<std::uint8_t, 8> response = { static_cast<std::uint8_t>(Function::SelectColourMapCommand),
+				  get_low_byte(objectID), get_high_byte(objectID), error, 0xFF, 0xFF, 0xFF, 0xFF };
+				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+				  response.data(), response.size(), serverInternalControlFunction, message.get_source_control_function(), get_priority());
+			}
+			break;
+
 			case Function::ExecuteMacroCommand:
 			{
 				auto objectID = static_cast<std::uint16_t>(data[1]);

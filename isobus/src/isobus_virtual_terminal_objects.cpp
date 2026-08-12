@@ -7786,6 +7786,41 @@ namespace isobus
 		return retVal;
 	}
 
+	VirtualTerminalObjectType ColourPalette::get_object_type() const { return VirtualTerminalObjectType::ColourPalette; }
+	std::uint32_t ColourPalette::get_minumum_object_length() const { return 6; }
+	bool ColourPalette::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		return (NULL_OBJECT_ID != objectID) && (colours.size() <= 256);
+	}
+	bool ColourPalette::set_attribute(std::uint8_t attributeID, std::uint32_t raw,
+	                                  const std::map<std::uint16_t, std::shared_ptr<VTObject>> &,
+	                                  AttributeError &error)
+	{
+		if (attributeID == static_cast<std::uint8_t>(AttributeName::Options) && raw == 0) return true;
+		error = (attributeID >= static_cast<std::uint8_t>(AttributeName::NumberOfAttributes)) ?
+		          AttributeError::InvalidAttributeID : AttributeError::InvalidValue;
+		return false;
+	}
+	bool ColourPalette::get_attribute(std::uint8_t attributeID, std::uint32_t &raw) const
+	{
+		if (attributeID == static_cast<std::uint8_t>(AttributeName::Type)) raw = static_cast<std::uint8_t>(get_object_type());
+		else if (attributeID == static_cast<std::uint8_t>(AttributeName::Options)) raw = 0;
+		else return false;
+		return true;
+	}
+	bool ColourPalette::set_colour(std::uint16_t index, VTColourVector colour)
+	{
+		if (index > 255) return false;
+		if (colours.size() <= index) colours.resize(index + 1);
+		colours[index] = colour;
+		return true;
+	}
+	std::size_t ColourPalette::get_number_of_colours() const { return colours.size(); }
+	VTColourVector ColourPalette::get_colour(std::uint8_t index) const
+	{
+		return index < colours.size() ? colours[index] : VTColourVector();
+	}
+
 	VirtualTerminalObjectType WindowMask::get_object_type() const
 	{
 		return VirtualTerminalObjectType::WindowMask;

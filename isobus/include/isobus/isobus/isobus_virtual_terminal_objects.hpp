@@ -49,6 +49,7 @@ namespace isobus
 		OutputArchedBarGraph = 19, ///< Used to output an arched bar graph.
 		GraphicsContext = 36, ///< Used to output a graphics context.
 		Animation = 44, ///< The Animation object is used to display simple animations
+		ColourPalette = 45, ///< Used to replace the VT standard colour palette
 		PictureGraphic = 20, ///< Used to output a picture graphic (bitmap).
 		GraphicData = 46, ///< Used to define the data for a graphic image
 		ScaledGraphic = 48, ///< Used to display a scaled representation of a graphic object
@@ -142,17 +143,18 @@ namespace isobus
 		float r; ///< Red value for a pixel, range 0.0f to 1.0f
 		float g; ///< Green value for a pixel, range 0.0f to 1.0f
 		float b; ///< Blue value for a pixel, range 0.0f to 1.0f
+		float a; ///< Alpha value for a pixel, range 0.0f to 1.0f
 
 		/// @brief Default constructor for a VT Colour, which produces the colour black
 		constexpr VTColourVector() :
-		  r(0.0f), g(0.0f), b(0.0f) {}
+		  r(0.0f), g(0.0f), b(0.0f), a(1.0f) {}
 
 		/// @brief Constructor for a VT Colour which initializes to an arbitrary colour
 		/// @param[in] red The red value for a pixel, range 0.0f to 1.0f
 		/// @param[in] green The green value for a pixel, range 0.0f to 1.0f
 		/// @param[in] blue The blue value for a pixel, range 0.0f to 1.0f
-		constexpr VTColourVector(float red, float green, float blue) :
-		  r(red), g(green), b(blue) {}
+		constexpr VTColourVector(float red, float green, float blue, float alpha = 1.0f) :
+		  r(red), g(green), b(blue), a(alpha) {}
 	};
 
 	/// @brief An object that represents the VT's active colour table
@@ -4072,6 +4074,23 @@ namespace isobus
 	private:
 		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 5; ///< The fewest bytes of IOP data that can represent this object
 		std::vector<std::uint8_t> colourMapData; ///< The actual colour map data, which remaps each index from the default table based on the size of this vector.
+	};
+
+	/// @brief VT6 Working Set-defined ARGB colour palette (ISO 11783-6 B.26).
+	class ColourPalette : public VTObject
+	{
+	public:
+		enum class AttributeName : std::uint8_t { Type = 0, Options = 1, NumberOfAttributes = 2 };
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t, std::uint32_t &) const override;
+		bool set_colour(std::uint16_t index, VTColourVector colour);
+		std::size_t get_number_of_colours() const;
+		VTColourVector get_colour(std::uint8_t index) const;
+	private:
+		std::vector<VTColourVector> colours;
 	};
 
 	/// @brief Defines a window mask object

@@ -111,6 +111,16 @@ namespace isobus
 					resolvedIndex = map->get_colour_map_index(colourIndex);
 			}
 		}
+		if (NULL_OBJECT_ID != selectedColourPalette)
+		{
+			auto object = vtObjectTree.find(selectedColourPalette);
+			if ((vtObjectTree.end() != object) && object->second &&
+			    (VirtualTerminalObjectType::ColourPalette == object->second->get_object_type()))
+			{
+				auto palette = std::static_pointer_cast<ColourPalette>(object->second);
+				if (resolvedIndex < palette->get_number_of_colours()) return palette->get_colour(resolvedIndex);
+			}
+		}
 		return workingSetColourTable.get_colour(resolvedIndex);
 	}
 
@@ -134,6 +144,19 @@ namespace isobus
 	{
 		return selectedColourMap;
 	}
+
+	bool VirtualTerminalWorkingSetBase::select_colour_palette(std::uint16_t objectID)
+	{
+		if (NULL_OBJECT_ID == objectID) { selectedColourPalette = NULL_OBJECT_ID; return true; }
+		auto object = vtObjectTree.find(objectID);
+		if ((vtObjectTree.end() == object) || !object->second ||
+		    (VirtualTerminalObjectType::ColourPalette != object->second->get_object_type()) ||
+		    !object->second->get_is_valid(vtObjectTree)) return false;
+		selectedColourPalette = objectID;
+		return true;
+	}
+
+	std::uint16_t VirtualTerminalWorkingSetBase::get_selected_colour_palette() const { return selectedColourPalette; }
 
 	void VirtualTerminalWorkingSetBase::reset_external_objects()
 	{
@@ -2003,7 +2026,7 @@ namespace isobus
 				}
 				break;
 
-				case VirtualTerminalObjectType::ColourMap:
+			case VirtualTerminalObjectType::ColourMap:
 				{
 					auto tempObject = std::make_shared<ColourMap>();
 
@@ -2045,6 +2068,31 @@ namespace isobus
 					if (retVal)
 					{
 						retVal = add_or_replace_object(tempObject);
+					}
+				}
+				break;
+
+			case VirtualTerminalObjectType::ColourPalette:
+				{
+					auto object = std::make_shared<ColourPalette>();
+					if (iopLength >= 6)
+					{
+						const auto count = get_little_endian_uint16(iopData, 4);
+						const std::uint32_t length = 6U + static_cast<std::uint32_t>(count) * 4U;
+						if ((0 == iopData[3]) && (count <= 256) && (iopLength >= length))
+						{
+							object->set_id(decodedID);
+							for (std::uint16_t index = 0; index < count; ++index)
+							{
+								const auto offset = 6U + index * 4U;
+								object->set_colour(index, VTColourVector(iopData[offset + 2] / 255.0F,
+								                                             iopData[offset + 1] / 255.0F,
+								                                             iopData[offset] / 255.0F,
+								                                             iopData[offset + 3] / 255.0F));
+							}
+							iopData += length; iopLength -= length;
+							retVal = add_or_replace_object(object);
+						}
 					}
 				}
 				break;

@@ -33,6 +33,8 @@ namespace isobus
 		VTColourVector get_colour(std::uint8_t colourIndex) const;
 		bool select_colour_map(std::uint16_t objectID);
 		std::uint16_t get_selected_colour_map() const;
+		bool select_colour_palette(std::uint16_t objectID);
+		std::uint16_t get_selected_colour_palette() const;
 		void reset_external_objects();
 
 		/// @brief Returns the working set's object tree
@@ -116,6 +118,7 @@ namespace isobus
 		std::uint16_t workingSetID = NULL_OBJECT_ID; ///< Stores the object ID of the working set object itself
 		std::uint16_t faultingObjectID = NULL_OBJECT_ID; ///< Stores the faulting object ID to send to a client when parsing the pool fails
 		std::uint16_t selectedColourMap = NULL_OBJECT_ID; ///< Active per-Working-Set colour remapping
+		std::uint16_t selectedColourPalette = NULL_OBJECT_ID; ///< Active VT6 Working Set palette
 	};
 } // namespace isobus
 #endif // ISOBUS_VIRTUAL_TERMINAL_WORKING_SET_BASE_HPP
