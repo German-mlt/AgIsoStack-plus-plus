@@ -66,6 +66,7 @@ namespace isobus
 		                                                                                 std::uint8_t errorCode);
 		static bool should_route_response_to_originator(VTVersion vtVersion,
 		                                                std::uint8_t workingSetVersion);
+		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_identify_vt_response();
 
 		/// @brief The Button Activation message allows the VT to transmit operator selection of a Button object to the Working
 		/// Set Master

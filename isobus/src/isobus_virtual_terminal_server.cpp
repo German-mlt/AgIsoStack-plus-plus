@@ -200,6 +200,12 @@ namespace isobus
 		return (vtVersion >= VTVersion::Version4) && (workingSetVersion >= 4);
 	}
 
+	std::array<std::uint8_t, CAN_DATA_LENGTH> VirtualTerminalServer::make_identify_vt_response()
+	{
+		return { static_cast<std::uint8_t>(Function::IdentifyVTMessage),
+		         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	}
+
 	VirtualTerminalBase::GraphicMode VirtualTerminalServer::get_graphic_mode() const
 	{
 		return VirtualTerminalBase::GraphicMode::TwoHundredFiftySixColour;
@@ -2141,6 +2147,14 @@ namespace isobus
 			case Function::IdentifyVTMessage:
 			{
 				identify_vt();
+				if (message.get_destination_control_function() == serverInternalControlFunction)
+				{
+					const auto response = make_identify_vt_response();
+					CANNetworkManager::CANNetwork.send_can_message(
+					  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+					  response.data(), response.size(), serverInternalControlFunction,
+					  message.get_source_control_function(), get_priority());
+				}
 			}
 			break;
 
