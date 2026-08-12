@@ -4134,6 +4134,25 @@ namespace isobus
 		std::vector<LanguagePair> languages;
 	};
 
+	class ScaledGraphic : public VTObject
+	{
+	public:
+		enum class AttributeName : std::uint8_t { Type = 0, Width = 1, Height = 2, ScaleType = 3, Options = 4, Value = 5, NumberOfAttributes = 6 };
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t, std::uint32_t &) const override;
+		std::uint16_t get_width() const { return width; } void set_width(std::uint16_t v) { width = v; }
+		std::uint16_t get_height() const { return height; } void set_height(std::uint16_t v) { height = v; }
+		std::uint8_t get_scale_type() const { return scaleType; } bool set_scale_type(std::uint8_t v);
+		std::uint8_t get_options() const { return options; } bool set_options(std::uint8_t v);
+		std::uint16_t get_value() const { return value; } void set_value(std::uint16_t v) { value = v; }
+	private:
+		std::uint16_t width = 0, height = 0, value = NULL_OBJECT_ID;
+		std::uint8_t scaleType = 0, options = 0;
+	};
+
 	/// @brief Defines a window mask object
 	class WindowMask : public VTObject
 	{

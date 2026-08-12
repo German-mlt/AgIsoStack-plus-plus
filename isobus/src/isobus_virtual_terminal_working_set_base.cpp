@@ -2148,6 +2148,22 @@ namespace isobus
 				}
 				break;
 
+			case VirtualTerminalObjectType::ScaledGraphic:
+				{
+					auto object = std::make_shared<ScaledGraphic>();
+					if (iopLength >= object->get_minumum_object_length())
+					{
+						object->set_id(decodedID); object->set_width(get_little_endian_uint16(iopData, 3));
+						object->set_height(get_little_endian_uint16(iopData, 5));
+						const bool attributesValid = object->set_scale_type(iopData[7]) && object->set_options(iopData[8]);
+						object->set_value(get_little_endian_uint16(iopData, 9));
+						const auto macroCount = iopData[11];
+						iopData += 12; iopLength -= 12;
+						if (attributesValid && parse_object_macro_reference(object, macroCount, iopData, iopLength)) retVal = add_or_replace_object(object);
+					}
+				}
+				break;
+
 				case VirtualTerminalObjectType::ObjectLabelRefrenceList:
 				{
 					auto object = std::make_shared<ObjectLabelReferenceList>();

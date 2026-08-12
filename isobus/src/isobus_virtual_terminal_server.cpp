@@ -2346,6 +2346,42 @@ namespace isobus
 			}
 			break;
 
+			case Function::SelectActiveWorkingSet:
+			{
+				std::uint8_t error = 0;
+				std::uint64_t requestedName = 0;
+				if (data.size() < 9) error = 0x80;
+				else for (std::uint8_t i = 0; i < 8; ++i) requestedName |= static_cast<std::uint64_t>(data[1 + i]) << (8U * i);
+				if (!error && activeWorkingSetMasterAddress != managedWorkingSet->get_control_function()->get_address()) error |= 0x01;
+				if (!error && activeWorkingSet) {
+					auto mask = activeWorkingSet->get_object_by_id(activeWorkingSetDataMaskObjectID);
+					if (mask && mask->get_object_type() == VirtualTerminalObjectType::AlarmMask) error |= 0x02;
+				}
+				auto target = std::find_if(managedWorkingSetList.begin(), managedWorkingSetList.end(), [requestedName](const auto &ws) {
+					return ws && ws->get_control_function() && ws->get_control_function()->get_NAME().get_full_name() == requestedName;
+				});
+				if (!error && target == managedWorkingSetList.end()) error |= 0x04;
+				std::shared_ptr<WorkingSet> targetObject;
+				if (!error) {
+					targetObject = std::dynamic_pointer_cast<WorkingSet>((*target)->get_working_set_object());
+					if (!targetObject) error |= 0x08;
+				}
+				std::shared_ptr<VTObject> targetMask;
+				if (!error) {
+					targetMask = (*target)->get_object_by_id(targetObject->get_active_mask());
+					if (!targetMask || targetMask->get_object_type() != VirtualTerminalObjectType::DataMask) error |= 0x10;
+				}
+				if (!error) {
+					activeWorkingSet = *target;
+					activeWorkingSetMasterAddress = (*target)->get_control_function()->get_address();
+					activeWorkingSetDataMaskObjectID = targetObject->get_active_mask();
+					onChangeActiveMaskEventDispatcher.call(*target, targetObject->get_id(), targetObject->get_active_mask());
+				}
+				const std::array<std::uint8_t, 8> response = { static_cast<std::uint8_t>(Function::SelectActiveWorkingSet), error, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), response.data(), response.size(), serverInternalControlFunction, message.get_source_control_function(), get_priority());
+			}
+			break;
+
 			case Function::ESCCommand:
 			{
 				const auto focusedObjectID = managedWorkingSet->get_object_focus();

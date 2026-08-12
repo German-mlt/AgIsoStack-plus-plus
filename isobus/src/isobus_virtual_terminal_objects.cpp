@@ -9,6 +9,8 @@
 #include "isobus/isobus/isobus_virtual_terminal_objects.hpp"
 
 #include <cmath>
+#include <functional>
+#include <set>
 #include "isobus/isobus/can_stack_logger.hpp"
 
 namespace isobus
@@ -7869,6 +7871,46 @@ namespace isobus
 		else if (aid == 1) raw = numberOfBytes;
 		else if (aid == 2) raw = colourMap;
 		else if (aid == 3) raw = colourPalette;
+		else return false;
+		return true;
+	}
+
+	VirtualTerminalObjectType ScaledGraphic::get_object_type() const { return VirtualTerminalObjectType::ScaledGraphic; }
+	std::uint32_t ScaledGraphic::get_minumum_object_length() const { return 12; }
+	bool ScaledGraphic::set_scale_type(std::uint8_t v)
+	{
+		if ((v & 0x80U) || ((v & 0x07U) > 4) || (((v >> 3U) & 0x03U) > 2) || (((v >> 5U) & 0x03U) > 2)) return false;
+		scaleType = v; return true;
+	}
+	bool ScaledGraphic::set_options(std::uint8_t v) { if (v & 0xFEU) return false; options = v; return true; }
+	bool ScaledGraphic::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &pool) const
+	{
+		if (NULL_OBJECT_ID == objectID || (scaleType & 0x80U) || ((scaleType & 7U) > 4) || (options & 0xFEU)) return false;
+		std::set<std::uint16_t> path;
+		std::function<bool(std::uint16_t)> validGraphic = [&](std::uint16_t id) {
+			if (NULL_OBJECT_ID == id) return true;
+			if (!path.insert(id).second) return false;
+			auto target = pool.find(id); if (target == pool.end() || !target->second) return false;
+			if (target->second->get_object_type() == VirtualTerminalObjectType::PictureGraphic || target->second->get_object_type() == VirtualTerminalObjectType::GraphicData) return true;
+			return target->second->get_object_type() == VirtualTerminalObjectType::ObjectPointer && validGraphic(std::static_pointer_cast<ObjectPointer>(target->second)->get_value());
+		};
+		return validGraphic(value);
+	}
+	bool ScaledGraphic::set_attribute(std::uint8_t aid, std::uint32_t raw, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &pool, AttributeError &error)
+	{
+		if (aid == 1) width = static_cast<std::uint16_t>(raw);
+		else if (aid == 2) height = static_cast<std::uint16_t>(raw);
+		else if (aid == 3) { if (!set_scale_type(static_cast<std::uint8_t>(raw))) { error = AttributeError::InvalidValue; return false; } }
+		else if (aid == 4) { if (!set_options(static_cast<std::uint8_t>(raw))) { error = AttributeError::InvalidValue; return false; } }
+		else if (aid == 5) { auto target = pool.find(static_cast<std::uint16_t>(raw)); if ((raw != NULL_OBJECT_ID) && (target == pool.end() || !target->second || (target->second->get_object_type() != VirtualTerminalObjectType::PictureGraphic && target->second->get_object_type() != VirtualTerminalObjectType::GraphicData && target->second->get_object_type() != VirtualTerminalObjectType::ObjectPointer))) { error = AttributeError::InvalidValue; return false; } value = static_cast<std::uint16_t>(raw); }
+		else { error = AttributeError::InvalidAttributeID; return false; }
+		return true;
+	}
+	bool ScaledGraphic::get_attribute(std::uint8_t aid, std::uint32_t &raw) const
+	{
+		if (aid == 0) raw = static_cast<std::uint8_t>(get_object_type()); else if (aid == 1) raw = width;
+		else if (aid == 2) raw = height; else if (aid == 3) raw = scaleType; else if (aid == 4) raw = options;
+		else if (aid == 5) raw = value;
 		else return false;
 		return true;
 	}
