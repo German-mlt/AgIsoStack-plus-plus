@@ -2031,9 +2031,160 @@ namespace isobus
 
 			case Function::AuxiliaryInputTypeTwoMaintenanceMessage:
 			{
-				// Todo? auto modelIdentificationCode = static_cast<std::uint16_t>(static_cast<std::uint16_t>(data[1]) | (static_cast<std::uint16_t>(data[2]) << 8));
-				// Todo? bool isReady = (1 == data[3]);
-				managedWorkingSet->set_auxiliary_input_maintenance_timestamp_ms(SystemTiming::get_timestamp_ms());
+				const auto modelIdentificationCode = get_little_endian_uint16(data, 1);
+				managedWorkingSet->set_auxiliary_input_state(
+				  modelIdentificationCode, data[3], SystemTiming::get_timestamp_ms());
+			}
+			break;
+
+			case Function::PreferredAssignmentCommand:
+			{
+				auto parsed = parse_preferred_auxiliary_assignment(data);
+				for (auto &assignment : parsed.assignments)
+				{
+					const auto functionObject = managedWorkingSet->get_object_by_id(assignment.functionObjectID);
+					if ((nullptr == functionObject) ||
+					    (VirtualTerminalObjectType::AuxiliaryFunctionType2 != functionObject->get_object_type()))
+					{
+						parsed.errorBitfield |= 0x02;
+						if (NULL_OBJECT_ID == parsed.faultingFunctionObjectID)
+							parsed.faultingFunctionObjectID = assignment.functionObjectID;
+						continue;
+					}
+
+					auto inputWorkingSet = std::find_if(
+					  managedWorkingSetList.begin(), managedWorkingSetList.end(),
+					  [&assignment](const auto &candidate) {
+						  return candidate->get_control_function()->get_NAME().get_full_name() == assignment.inputUnitName;
+					  });
+					if ((inputWorkingSet == managedWorkingSetList.end()) ||
+					    ((*inputWorkingSet)->get_auxiliary_input_model_identification_code() != assignment.modelIdentificationCode) ||
+					    ((*inputWorkingSet)->get_auxiliary_input_status() != 1) ||
+					    SystemTiming::time_expired_ms((*inputWorkingSet)->get_auxiliary_input_maintenance_timestamp_ms(), 300))
+					{
+						parsed.errorBitfield |= 0x01;
+						if (NULL_OBJECT_ID == parsed.faultingFunctionObjectID)
+							parsed.faultingFunctionObjectID = assignment.functionObjectID;
+						continue;
+					}
+
+					const auto inputObject = (*inputWorkingSet)->get_object_by_id(assignment.inputObjectID);
+					if ((nullptr == inputObject) ||
+					    (VirtualTerminalObjectType::AuxiliaryInputType2 != inputObject->get_object_type()))
+					{
+						parsed.errorBitfield |= 0x04;
+						if (NULL_OBJECT_ID == parsed.faultingFunctionObjectID)
+							parsed.faultingFunctionObjectID = assignment.functionObjectID;
+						continue;
+					}
+
+					const auto functionType = std::static_pointer_cast<AuxiliaryFunctionType2>(functionObject)->get_function_type();
+					const auto inputType = std::static_pointer_cast<AuxiliaryInputType2>(inputObject)->get_function_type();
+					if (functionType != inputType)
+					{
+						parsed.errorBitfield |= 0x10;
+						if (NULL_OBJECT_ID == parsed.faultingFunctionObjectID)
+							parsed.faultingFunctionObjectID = assignment.functionObjectID;
+					}
+					else
+					{
+						assignment.functionType = static_cast<std::uint8_t>(functionType);
+					}
+				}
+
+				if (0 == parsed.errorBitfield)
+				{
+					const auto functionWorkingSetName = managedWorkingSet->get_control_function()->get_NAME().get_full_name();
+					preferredAuxiliaryAssignments[functionWorkingSetName] = parsed.assignments;
+					for (auto &existing : managedAuxiliaryAssignments)
+					{
+						if ((existing.functionWorkingSetName == functionWorkingSetName) &&
+						    (AuxiliaryAssignmentState::Failed != existing.state))
+						{
+							existing.state = AuxiliaryAssignmentState::PendingRemoval;
+							existing.attempts = 0;
+						}
+					}
+					for (const auto &assignment : parsed.assignments)
+					{
+						managedAuxiliaryAssignments.push_back({ assignment,
+						                                                functionWorkingSetName,
+						                                                AuxiliaryAssignmentState::PendingEnable,
+						                                                0, 0 });
+					}
+				}
+				send_preferred_assignment_response(parsed.errorBitfield,
+				                                  parsed.faultingFunctionObjectID,
+				                                  message.get_source_control_function());
+			}
+			break;
+
+			case Function::AuxiliaryInputStatusTypeTwoEnableCommand:
+			{
+				const auto inputObjectID = get_little_endian_uint16(data, 1);
+				const auto sourceName = managedWorkingSet->get_control_function()->get_NAME().get_full_name();
+				for (auto &assignment : managedAuxiliaryAssignments)
+				{
+					if ((assignment.assignment.inputUnitName == sourceName) &&
+					    (assignment.assignment.inputObjectID == inputObjectID) &&
+					    ((AuxiliaryAssignmentState::WaitingEnableResponse == assignment.state) ||
+					     (AuxiliaryAssignmentState::WaitingDisableResponse == assignment.state)))
+					{
+						const bool disabling = AuxiliaryAssignmentState::WaitingDisableResponse == assignment.state;
+						assignment.state = ((0 == data[4]) && (data[3] == (disabling ? 0 : 1)))
+						  ? (disabling ? AuxiliaryAssignmentState::Failed
+						               : AuxiliaryAssignmentState::PendingAssignment)
+						  : AuxiliaryAssignmentState::Failed;
+						assignment.attempts = 0;
+					}
+				}
+			}
+			break;
+
+			case Function::AuxiliaryAssignmentTypeTwoCommand:
+			{
+				const auto functionObjectID = get_little_endian_uint16(data, 1);
+				const auto sourceName = managedWorkingSet->get_control_function()->get_NAME().get_full_name();
+				for (auto &assignment : managedAuxiliaryAssignments)
+				{
+					if ((assignment.functionWorkingSetName == sourceName) &&
+					    (assignment.assignment.functionObjectID == functionObjectID) &&
+					    ((AuxiliaryAssignmentState::WaitingAssignmentResponse == assignment.state) ||
+					     (AuxiliaryAssignmentState::WaitingRemovalResponse == assignment.state)))
+					{
+						const bool removal = AuxiliaryAssignmentState::WaitingRemovalResponse == assignment.state;
+						if (0 != (data[3] & 0x01))
+						{
+							assignment.state = AuxiliaryAssignmentState::Failed;
+						}
+						else if (!removal)
+						{
+							assignment.state = AuxiliaryAssignmentState::Active;
+						}
+						else
+						{
+							const bool inputAvailable = std::any_of(
+							  managedWorkingSetList.begin(), managedWorkingSetList.end(),
+							  [&assignment](const auto &workingSet) {
+								  return workingSet->get_control_function()->get_NAME().get_full_name() ==
+								         assignment.assignment.inputUnitName;
+							  });
+							const bool inputStillUsed = std::any_of(
+							  managedAuxiliaryAssignments.begin(), managedAuxiliaryAssignments.end(),
+							  [&assignment](const auto &other) {
+								  return (&other != &assignment) &&
+								         (other.assignment.inputUnitName == assignment.assignment.inputUnitName) &&
+								         (other.assignment.inputObjectID == assignment.assignment.inputObjectID) &&
+								         (AuxiliaryAssignmentState::Active == other.state);
+							  });
+							assignment.state = (inputStillUsed || !inputAvailable)
+							  ? AuxiliaryAssignmentState::Failed
+							  : AuxiliaryAssignmentState::PendingDisable;
+						}
+						assignment.attempts = 0;
+						break;
+					}
+				}
 			}
 			break;
 
@@ -2259,6 +2410,7 @@ namespace isobus
 			case Function::ExtendedDeleteVersionCommand:
 			case Function::DeleteObjectPoolCommand:
 			case Function::WorkingSetMaintenanceMessage:
+			case Function::PreferredAssignmentCommand:
 				return true;
 			default:
 				return false;
@@ -3274,7 +3426,8 @@ namespace isobus
 			{
 				if (nullptr == workingSet->get_working_set_object())
 					continue;
-				std::map<std::uint8_t, std::uint8_t> sets;
+				std::map<std::uint16_t, std::uint8_t> groupedSets;
+				const auto workingSetName = workingSet->get_control_function()->get_NAME().get_full_name();
 				for (const auto &entry : workingSet->get_object_tree())
 				{
 					if ((nullptr == entry.second) || (requestedType != entry.second->get_object_type()))
@@ -3282,20 +3435,252 @@ namespace isobus
 					std::uint32_t attributes = 0;
 					if (entry.second->get_attribute(2, attributes))
 					{
-						auto &count = sets[static_cast<std::uint8_t>(attributes)];
+						const bool assigned = std::any_of(
+						  managedAuxiliaryAssignments.begin(), managedAuxiliaryAssignments.end(),
+						  [requestType, workingSetName, objectID = entry.first](const auto &assignment) {
+							  if (AuxiliaryAssignmentState::Active != assignment.state)
+								  return false;
+							  return (0 == requestType)
+							    ? ((assignment.assignment.inputUnitName == workingSetName) &&
+							       (assignment.assignment.inputObjectID == objectID))
+							    : ((assignment.functionWorkingSetName == workingSetName) &&
+							       (assignment.assignment.functionObjectID == objectID));
+						  });
+						const std::uint8_t assignedAttributes = static_cast<std::uint8_t>(requestType | (assigned ? 0x02 : 0));
+						const std::uint16_t key = static_cast<std::uint8_t>(attributes) |
+						                          (static_cast<std::uint16_t>(assignedAttributes) << 8);
+						auto &count = groupedSets[key];
 						if (count < 0xFF)
 							++count;
 					}
 				}
-				if (sets.empty() || (units.size() == 0xFF))
+				if (groupedSets.empty() || (units.size() == 0xFF))
 					continue;
-				units.push_back({ workingSet->get_control_function()->get_NAME().get_full_name(), std::move(sets) });
+				AuxiliaryCapabilitiesUnit unit;
+				unit.name = workingSetName;
+				for (const auto &set : groupedSets)
+					unit.sets.push_back({ set.second, static_cast<std::uint8_t>(set.first), static_cast<std::uint8_t>(set.first >> 8) });
+				units.push_back(std::move(unit));
 			}
 		}
 		auto buffer = make_auxiliary_capabilities_response(requestType, units);
 		return CANNetworkManager::CANNetwork.send_can_message(
 		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 		  buffer.data(), buffer.size(), serverInternalControlFunction, destination, get_priority());
+	}
+
+	bool VirtualTerminalServer::send_preferred_assignment_response(
+	  std::uint8_t errorBitfield, std::uint16_t faultingFunctionObjectID,
+	  std::shared_ptr<ControlFunction> destination) const
+	{
+		const auto buffer = make_preferred_assignment_response(errorBitfield,
+		                                                       faultingFunctionObjectID);
+		return CANNetworkManager::CANNetwork.send_can_message(
+		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+		  buffer.data(), buffer.size(), serverInternalControlFunction, destination, get_priority());
+	}
+
+	bool VirtualTerminalServer::send_auxiliary_input_enable_command(
+	  std::uint16_t inputObjectID, bool enable, std::shared_ptr<ControlFunction> destination) const
+	{
+		const auto buffer = make_auxiliary_input_enable_command(inputObjectID, enable);
+		return CANNetworkManager::CANNetwork.send_can_message(
+		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+		  buffer.data(), buffer.size(), serverInternalControlFunction, destination, get_priority());
+	}
+
+	bool VirtualTerminalServer::send_auxiliary_assignment_command(
+	  const PreferredAuxiliaryAssignment &assignment,
+	  std::shared_ptr<ControlFunction> destination, bool remove) const
+	{
+		const auto buffer = make_auxiliary_assignment_command(assignment, remove);
+		return CANNetworkManager::CANNetwork.send_can_message(
+		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+		  buffer.data(), buffer.size(), serverInternalControlFunction, destination, get_priority());
+	}
+
+	std::array<std::uint8_t, CAN_DATA_LENGTH> VirtualTerminalServer::make_preferred_assignment_response(
+	  std::uint8_t errorBitfield, std::uint16_t faultingFunctionObjectID)
+	{
+		return {
+		  static_cast<std::uint8_t>(Function::PreferredAssignmentCommand),
+		  errorBitfield,
+		  get_low_byte(faultingFunctionObjectID),
+		  get_high_byte(faultingFunctionObjectID),
+		  0xFF, 0xFF, 0xFF, 0xFF
+		};
+	}
+
+	std::array<std::uint8_t, CAN_DATA_LENGTH> VirtualTerminalServer::make_auxiliary_input_enable_command(
+	  std::uint16_t inputObjectID, bool enable)
+	{
+		return {
+		  static_cast<std::uint8_t>(Function::AuxiliaryInputStatusTypeTwoEnableCommand),
+		  get_low_byte(inputObjectID), get_high_byte(inputObjectID),
+		  static_cast<std::uint8_t>(enable), 0xFF, 0xFF, 0xFF, 0xFF
+		};
+	}
+
+	std::array<std::uint8_t, 14> VirtualTerminalServer::make_auxiliary_assignment_command(
+	  const PreferredAuxiliaryAssignment &assignment, bool remove)
+	{
+		std::array<std::uint8_t, 14> buffer{};
+		buffer[0] = static_cast<std::uint8_t>(Function::AuxiliaryAssignmentTypeTwoCommand);
+		const auto inputName = remove ? std::numeric_limits<std::uint64_t>::max() : assignment.inputUnitName;
+		for (std::uint8_t byte = 0; byte < 8; ++byte)
+			buffer[1 + byte] = static_cast<std::uint8_t>(inputName >> (8 * byte));
+		buffer[9] = remove ? 0x9F : static_cast<std::uint8_t>(0x80 | assignment.functionType);
+		const auto inputObjectID = remove ? NULL_OBJECT_ID : assignment.inputObjectID;
+		buffer[10] = get_low_byte(inputObjectID);
+		buffer[11] = get_high_byte(inputObjectID);
+		buffer[12] = get_low_byte(assignment.functionObjectID);
+		buffer[13] = get_high_byte(assignment.functionObjectID);
+		return buffer;
+	}
+
+	void VirtualTerminalServer::update_auxiliary_assignments()
+	{
+		const auto findWorkingSet = [this](std::uint64_t name) {
+			return std::find_if(managedWorkingSetList.begin(), managedWorkingSetList.end(),
+			                    [name](const auto &workingSet) {
+				                    return workingSet->get_control_function()->get_NAME().get_full_name() == name;
+			                    });
+		};
+		for (auto &managed : managedAuxiliaryAssignments)
+		{
+			if ((AuxiliaryAssignmentState::Active == managed.state) &&
+			    ([&]() {
+				    const auto input = findWorkingSet(managed.assignment.inputUnitName);
+				    return (input == managedWorkingSetList.end()) ||
+				           ((*input)->get_auxiliary_input_status() != 1) ||
+				           SystemTiming::time_expired_ms((*input)->get_auxiliary_input_maintenance_timestamp_ms(), 300);
+			    })())
+			{
+				managed.state = AuxiliaryAssignmentState::PendingRemoval;
+				managed.attempts = 0;
+			}
+
+			const bool waiting = (AuxiliaryAssignmentState::WaitingEnableResponse == managed.state) ||
+			                     (AuxiliaryAssignmentState::WaitingAssignmentResponse == managed.state) ||
+			                     (AuxiliaryAssignmentState::WaitingRemovalResponse == managed.state) ||
+			                     (AuxiliaryAssignmentState::WaitingDisableResponse == managed.state);
+			if (waiting && !SystemTiming::time_expired_ms(managed.lastCommandTimestampMs, 2000))
+				continue;
+			if (waiting)
+			{
+				if (managed.attempts >= 3)
+				{
+					managed.state = AuxiliaryAssignmentState::Failed;
+					continue;
+				}
+				if (AuxiliaryAssignmentState::WaitingEnableResponse == managed.state)
+					managed.state = AuxiliaryAssignmentState::PendingEnable;
+				else if (AuxiliaryAssignmentState::WaitingDisableResponse == managed.state)
+					managed.state = AuxiliaryAssignmentState::PendingDisable;
+				else if (AuxiliaryAssignmentState::WaitingAssignmentResponse == managed.state)
+					managed.state = AuxiliaryAssignmentState::PendingAssignment;
+				else
+					managed.state = AuxiliaryAssignmentState::PendingRemoval;
+			}
+
+			if ((AuxiliaryAssignmentState::PendingEnable == managed.state) ||
+			    (AuxiliaryAssignmentState::PendingDisable == managed.state))
+			{
+				const bool disabling = AuxiliaryAssignmentState::PendingDisable == managed.state;
+				const bool inputAlreadyEnabled = !disabling && std::any_of(
+				  managedAuxiliaryAssignments.begin(), managedAuxiliaryAssignments.end(),
+				  [&managed](const auto &other) {
+					  return (&other != &managed) &&
+					         (other.assignment.inputUnitName == managed.assignment.inputUnitName) &&
+					         (other.assignment.inputObjectID == managed.assignment.inputObjectID) &&
+					         ((AuxiliaryAssignmentState::PendingAssignment == other.state) ||
+					          (AuxiliaryAssignmentState::WaitingAssignmentResponse == other.state) ||
+					          (AuxiliaryAssignmentState::Active == other.state) ||
+					          (AuxiliaryAssignmentState::PendingRemoval == other.state) ||
+					          (AuxiliaryAssignmentState::WaitingRemovalResponse == other.state));
+				  });
+				if (inputAlreadyEnabled)
+				{
+					managed.state = AuxiliaryAssignmentState::PendingAssignment;
+					managed.attempts = 0;
+					continue;
+				}
+				const bool priorRemovalInFlight = !disabling && std::any_of(
+				  managedAuxiliaryAssignments.begin(), managedAuxiliaryAssignments.end(),
+				  [&managed](const auto &other) {
+					  return (&other != &managed) &&
+					         (other.functionWorkingSetName == managed.functionWorkingSetName) &&
+					         ((AuxiliaryAssignmentState::PendingRemoval == other.state) ||
+					          (AuxiliaryAssignmentState::WaitingRemovalResponse == other.state) ||
+					          (AuxiliaryAssignmentState::PendingDisable == other.state) ||
+					          (AuxiliaryAssignmentState::WaitingDisableResponse == other.state));
+				  });
+				if (priorRemovalInFlight)
+					continue;
+				const bool enableInFlight = std::any_of(
+				  managedAuxiliaryAssignments.begin(), managedAuxiliaryAssignments.end(),
+				  [&managed](const auto &other) {
+					  return (&other != &managed) &&
+					         (other.assignment.inputUnitName == managed.assignment.inputUnitName) &&
+					         (other.assignment.inputObjectID == managed.assignment.inputObjectID) &&
+					         ((AuxiliaryAssignmentState::WaitingEnableResponse == other.state) ||
+					          (AuxiliaryAssignmentState::WaitingDisableResponse == other.state));
+				  });
+				if (enableInFlight)
+					continue;
+				const auto input = findWorkingSet(managed.assignment.inputUnitName);
+				if ((input != managedWorkingSetList.end()) &&
+				    send_auxiliary_input_enable_command(managed.assignment.inputObjectID, !disabling,
+				                                        (*input)->get_control_function()))
+				{
+					managed.state = disabling ? AuxiliaryAssignmentState::WaitingDisableResponse
+					                           : AuxiliaryAssignmentState::WaitingEnableResponse;
+					++managed.attempts;
+					managed.lastCommandTimestampMs = SystemTiming::get_timestamp_ms();
+				}
+			}
+			else if ((AuxiliaryAssignmentState::PendingAssignment == managed.state) ||
+			         (AuxiliaryAssignmentState::PendingRemoval == managed.state))
+			{
+				const bool removal = AuxiliaryAssignmentState::PendingRemoval == managed.state;
+				const bool anotherPending = std::any_of(
+				  managedAuxiliaryAssignments.begin(), managedAuxiliaryAssignments.end(),
+				  [&managed](const auto &other) {
+					  return (&other != &managed) &&
+					         (other.functionWorkingSetName == managed.functionWorkingSetName) &&
+					         ((AuxiliaryAssignmentState::WaitingAssignmentResponse == other.state) ||
+					          (AuxiliaryAssignmentState::WaitingRemovalResponse == other.state));
+				  });
+				const auto function = findWorkingSet(managed.functionWorkingSetName);
+				if (!anotherPending && (function != managedWorkingSetList.end()) &&
+				    send_auxiliary_assignment_command(managed.assignment,
+				                                      (*function)->get_control_function(), removal))
+				{
+					managed.state = removal ? AuxiliaryAssignmentState::WaitingRemovalResponse
+					                        : AuxiliaryAssignmentState::WaitingAssignmentResponse;
+					++managed.attempts;
+					managed.lastCommandTimestampMs = SystemTiming::get_timestamp_ms();
+				}
+			}
+		}
+	}
+
+	void VirtualTerminalServer::suspend_auxiliary_assignments_for_working_set(std::uint64_t workingSetName)
+	{
+		preferredAuxiliaryAssignments.erase(workingSetName);
+		for (auto &managed : managedAuxiliaryAssignments)
+		{
+			if (managed.assignment.inputUnitName == workingSetName)
+			{
+				managed.state = AuxiliaryAssignmentState::PendingRemoval;
+				managed.attempts = 0;
+			}
+			else if (managed.functionWorkingSetName == workingSetName)
+			{
+				managed.state = AuxiliaryAssignmentState::PendingDisable;
+				managed.attempts = 0;
+			}
+		}
 	}
 
 	std::vector<std::uint8_t> VirtualTerminalServer::make_auxiliary_capabilities_response(
@@ -3318,12 +3703,76 @@ namespace isobus
 			{
 				if (setIndex++ == 0xFF)
 					break;
-				buffer.push_back(set.second);
-				buffer.push_back(set.first);
-				buffer.push_back(requestType);
+				buffer.push_back(set.numberOfInstances);
+				buffer.push_back(set.functionAttributes);
+				buffer.push_back(set.assignedAttributes);
 			}
 		}
 		return buffer;
+	}
+
+	VirtualTerminalServer::PreferredAuxiliaryAssignmentParseResult
+	VirtualTerminalServer::parse_preferred_auxiliary_assignment(const std::vector<std::uint8_t> &messageData)
+	{
+		PreferredAuxiliaryAssignmentParseResult result;
+		if ((messageData.size() < 2) ||
+		    (messageData[0] != static_cast<std::uint8_t>(Function::PreferredAssignmentCommand)))
+		{
+			result.errorBitfield = 0x10;
+			return result;
+		}
+
+		std::size_t offset = 2;
+		std::set<std::uint16_t> functionIDs;
+		for (std::uint16_t unitIndex = 0; unitIndex < messageData[1]; ++unitIndex)
+		{
+			if ((offset + 11) > messageData.size())
+			{
+				result.errorBitfield |= 0x10;
+				return result;
+			}
+			std::uint64_t inputName = 0;
+			for (std::uint8_t byte = 0; byte < 8; ++byte)
+				inputName |= static_cast<std::uint64_t>(messageData[offset + byte]) << (8 * byte);
+			offset += 8;
+			const auto model = static_cast<std::uint16_t>(messageData[offset]) |
+			                   (static_cast<std::uint16_t>(messageData[offset + 1]) << 8);
+			offset += 2;
+			const auto numberOfFunctions = messageData[offset++];
+			if ((offset + (static_cast<std::size_t>(numberOfFunctions) * 4)) > messageData.size())
+			{
+				result.errorBitfield |= 0x10;
+				return result;
+			}
+			for (std::uint16_t functionIndex = 0; functionIndex < numberOfFunctions; ++functionIndex)
+			{
+				PreferredAuxiliaryAssignment assignment;
+				assignment.inputUnitName = inputName;
+				assignment.modelIdentificationCode = model;
+				assignment.functionObjectID = static_cast<std::uint16_t>(messageData[offset]) |
+				                              (static_cast<std::uint16_t>(messageData[offset + 1]) << 8);
+				assignment.inputObjectID = static_cast<std::uint16_t>(messageData[offset + 2]) |
+				                           (static_cast<std::uint16_t>(messageData[offset + 3]) << 8);
+				offset += 4;
+				if (!functionIDs.insert(assignment.functionObjectID).second)
+				{
+					result.errorBitfield |= 0x08;
+					if (NULL_OBJECT_ID == result.faultingFunctionObjectID)
+						result.faultingFunctionObjectID = assignment.functionObjectID;
+				}
+				result.assignments.push_back(assignment);
+			}
+		}
+
+		for (; offset < messageData.size(); ++offset)
+		{
+			if (0xFF != messageData[offset])
+			{
+				result.errorBitfield |= 0x10;
+				break;
+			}
+		}
+		return result;
 	}
 
 	bool VirtualTerminalServer::send_capture_screen_response(std::uint8_t item, std::uint8_t path, std::uint8_t errorCode, std::uint16_t imageId, std::shared_ptr<ControlFunction> requestor) const
@@ -3348,6 +3797,7 @@ namespace isobus
 
 	void VirtualTerminalServer::update()
 	{
+		update_auxiliary_assignments();
 		if ((isobus::SystemTiming::time_expired_ms(statusMessageTimestamp_ms, 1000)) &&
 		    (send_status_message()))
 		{

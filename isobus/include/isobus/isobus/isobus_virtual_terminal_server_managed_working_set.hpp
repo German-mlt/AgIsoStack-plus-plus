@@ -125,6 +125,11 @@ namespace isobus
 		/// from the client.
 		/// @returns The timestamp for when we received the last auxiliary input maintenance message
 		std::uint32_t get_auxiliary_input_maintenance_timestamp_ms() const;
+		void set_auxiliary_input_state(std::uint16_t modelIdentificationCode,
+		                               std::uint8_t status,
+		                               std::uint32_t timestampMs);
+		std::uint16_t get_auxiliary_input_model_identification_code() const;
+		std::uint8_t get_auxiliary_input_status() const;
 
 		/// @brief Marks the working set for deletion/deactivation by the server.
 		/// The server will call this when object pool deletion is requested for this working set
@@ -164,6 +169,8 @@ namespace isobus
 		ObjectPoolProcessingThreadState processingState = ObjectPoolProcessingThreadState::None; ///< Stores the state of processing the object pool
 		std::uint32_t workingSetMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track sending of the maintenance message
 		std::uint32_t auxiliaryInputMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track if/when the working set sent an auxiliary input maintenance message
+		std::uint16_t auxiliaryInputModelIdentificationCode = 0xFFFF;
+		std::uint8_t auxiliaryInputStatus = 0;
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
 		bool focusedObjectOpenForInput = false; ///< True while the focused input object is being edited
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained

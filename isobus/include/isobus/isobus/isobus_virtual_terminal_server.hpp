@@ -69,11 +69,39 @@ namespace isobus
 		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_identify_vt_response();
 		struct AuxiliaryCapabilitiesUnit
 		{
+			struct Set
+			{
+				std::uint8_t numberOfInstances = 0;
+				std::uint8_t functionAttributes = 0;
+				std::uint8_t assignedAttributes = 0;
+			};
 			std::uint64_t name = 0;
-			std::map<std::uint8_t, std::uint8_t> sets;
+			std::vector<Set> sets;
 		};
 		static std::vector<std::uint8_t> make_auxiliary_capabilities_response(
 		  std::uint8_t requestType, const std::vector<AuxiliaryCapabilitiesUnit> &units);
+		struct PreferredAuxiliaryAssignment
+		{
+			std::uint64_t inputUnitName = 0;
+			std::uint16_t modelIdentificationCode = 0;
+			std::uint16_t functionObjectID = NULL_OBJECT_ID;
+			std::uint16_t inputObjectID = NULL_OBJECT_ID;
+			std::uint8_t functionType = 0;
+		};
+		struct PreferredAuxiliaryAssignmentParseResult
+		{
+			std::vector<PreferredAuxiliaryAssignment> assignments;
+			std::uint8_t errorBitfield = 0;
+			std::uint16_t faultingFunctionObjectID = NULL_OBJECT_ID;
+		};
+		static PreferredAuxiliaryAssignmentParseResult parse_preferred_auxiliary_assignment(
+		  const std::vector<std::uint8_t> &messageData);
+		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_preferred_assignment_response(
+		  std::uint8_t errorBitfield, std::uint16_t faultingFunctionObjectID);
+		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_auxiliary_input_enable_command(
+		  std::uint16_t inputObjectID, bool enable);
+		static std::array<std::uint8_t, 14> make_auxiliary_assignment_command(
+		  const PreferredAuxiliaryAssignment &assignment, bool remove);
 
 		/// @brief The Button Activation message allows the VT to transmit operator selection of a Button object to the Working
 		/// Set Master
@@ -823,6 +851,16 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false.
 		bool send_audio_volume_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 		bool send_auxiliary_capabilities_response(std::uint8_t requestType, std::shared_ptr<ControlFunction> destination) const;
+		bool send_preferred_assignment_response(std::uint8_t errorBitfield,
+		                                        std::uint16_t faultingFunctionObjectID,
+		                                        std::shared_ptr<ControlFunction> destination) const;
+		bool send_auxiliary_input_enable_command(std::uint16_t inputObjectID, bool enable,
+		                                         std::shared_ptr<ControlFunction> destination) const;
+		bool send_auxiliary_assignment_command(const PreferredAuxiliaryAssignment &assignment,
+		                                       std::shared_ptr<ControlFunction> destination,
+		                                       bool remove) const;
+		void update_auxiliary_assignments();
+		void suspend_auxiliary_assignments_for_working_set(std::uint64_t workingSetName);
 
 		/// @brief Sends a response message to the Screen capture command
 		/// @param[in] item Item requested from the Screen Capture command
@@ -856,6 +894,29 @@ namespace isobus
 		std::uint16_t activeWorkingSetDataMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the active working set's data mask
 		std::uint16_t activeWorkingSetSoftkeyMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the active working set's soft key mask
 		std::uint8_t activeWorkingSetMasterAddress = NULL_CAN_ADDRESS; ///< The address of the active working set's master
+		std::map<std::uint64_t, std::vector<PreferredAuxiliaryAssignment>> preferredAuxiliaryAssignments;
+		enum class AuxiliaryAssignmentState
+		{
+			PendingEnable,
+			WaitingEnableResponse,
+			PendingAssignment,
+			WaitingAssignmentResponse,
+			Active,
+			PendingRemoval,
+			WaitingRemovalResponse,
+			PendingDisable,
+			WaitingDisableResponse,
+			Failed
+		};
+		struct ManagedAuxiliaryAssignment
+		{
+			PreferredAuxiliaryAssignment assignment;
+			std::uint64_t functionWorkingSetName = 0;
+			AuxiliaryAssignmentState state = AuxiliaryAssignmentState::PendingEnable;
+			std::uint8_t attempts = 0;
+			std::uint32_t lastCommandTimestampMs = 0;
+		};
+		std::vector<ManagedAuxiliaryAssignment> managedAuxiliaryAssignments;
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
 		bool initialized = false; ///< True if the server has been initialized, otherwise false

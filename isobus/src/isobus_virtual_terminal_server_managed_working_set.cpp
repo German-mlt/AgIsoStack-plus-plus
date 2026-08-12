@@ -166,6 +166,24 @@ namespace isobus
 		return auxiliaryInputMaintenanceMessageTimestamp_ms;
 	}
 
+	void VirtualTerminalServerManagedWorkingSet::set_auxiliary_input_state(
+	  std::uint16_t modelIdentificationCode, std::uint8_t status, std::uint32_t timestampMs)
+	{
+		auxiliaryInputModelIdentificationCode = modelIdentificationCode;
+		auxiliaryInputStatus = status;
+		auxiliaryInputMaintenanceMessageTimestamp_ms = timestampMs;
+	}
+
+	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_auxiliary_input_model_identification_code() const
+	{
+		return auxiliaryInputModelIdentificationCode;
+	}
+
+	std::uint8_t VirtualTerminalServerManagedWorkingSet::get_auxiliary_input_status() const
+	{
+		return auxiliaryInputStatus;
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::request_deletion()
 	{
 		workingSetDeletionRequested = true;
