@@ -67,6 +67,13 @@ namespace isobus
 		static bool should_route_response_to_originator(VTVersion vtVersion,
 		                                                std::uint8_t workingSetVersion);
 		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_identify_vt_response();
+		static std::uint8_t make_transaction_byte(VTVersion vtVersion,
+		                                          std::uint8_t workingSetVersion,
+		                                          std::uint8_t transactionNumber);
+		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_screen_capture_response(
+		  std::uint8_t item, std::uint8_t path, std::uint8_t errorCode, std::uint16_t imageId);
+		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_select_active_working_set_response(
+		  std::uint8_t errorCode);
 		struct AuxiliaryCapabilitiesUnit
 		{
 			struct Set
@@ -863,6 +870,12 @@ namespace isobus
 		                                       std::shared_ptr<ControlFunction> destination,
 		                                       bool remove) const;
 		void update_auxiliary_assignments();
+		std::uint8_t next_transaction_byte(const std::shared_ptr<ControlFunction> &destination) const;
+		bool send_tracked_activation(const std::uint8_t *data, std::uint32_t length,
+		                             const std::shared_ptr<ControlFunction> &destination,
+		                             std::uint8_t tanIndex) const;
+		void acknowledge_activation(const CANMessage &message);
+		void update_activation_transactions();
 		void suspend_auxiliary_assignments_for_working_set(std::uint64_t workingSetName);
 
 		/// @brief Sends a response message to the Screen capture command
@@ -920,6 +933,11 @@ namespace isobus
 			std::uint32_t lastCommandTimestampMs = 0;
 		};
 		std::vector<ManagedAuxiliaryAssignment> managedAuxiliaryAssignments;
+		mutable std::map<std::uint64_t, std::uint8_t> transactionNumbers;
+		struct PendingActivation { std::vector<std::uint8_t> data; std::shared_ptr<ControlFunction> destination; std::uint8_t tanIndex = 0xFF; std::uint8_t attempts = 1; std::uint32_t timestamp = 0; };
+		mutable std::vector<PendingActivation> pendingActivations;
+		mutable std::mutex pendingActivationMutex;
+		mutable std::vector<std::uint64_t> unexpectedlyDisconnectedWorkingSets;
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
 		bool initialized = false; ///< True if the server has been initialized, otherwise false

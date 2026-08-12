@@ -206,6 +206,28 @@ namespace isobus
 		         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 	}
 
+	std::uint8_t VirtualTerminalServer::make_transaction_byte(
+	  VTVersion vtVersion, std::uint8_t workingSetVersion,
+	  std::uint8_t transactionNumber)
+	{
+		return ((vtVersion >= VTVersion::Version6) && (workingSetVersion >= 6))
+		  ? static_cast<std::uint8_t>(((transactionNumber & 0x0FU) << 4U) | 0x0FU)
+		  : 0xFF;
+	}
+
+	std::array<std::uint8_t, CAN_DATA_LENGTH> VirtualTerminalServer::make_screen_capture_response(
+	  std::uint8_t item, std::uint8_t path, std::uint8_t errorCode, std::uint16_t imageId)
+	{
+		return { static_cast<std::uint8_t>(Function::ScreenCapture), item, path, errorCode,
+		         static_cast<std::uint8_t>(errorCode ? 0xFF : get_low_byte(imageId)),
+		         static_cast<std::uint8_t>(errorCode ? 0xFF : get_high_byte(imageId)), 0xFF, 0xFF };
+	}
+
+	std::array<std::uint8_t, CAN_DATA_LENGTH> VirtualTerminalServer::make_select_active_working_set_response(std::uint8_t errorCode)
+	{
+		return { static_cast<std::uint8_t>(Function::SelectActiveWorkingSet), errorCode, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	}
+
 	VirtualTerminalBase::GraphicMode VirtualTerminalServer::get_graphic_mode() const
 	{
 		return VirtualTerminalBase::GraphicMode::TwoHundredFiftySixColour;
@@ -289,6 +311,18 @@ namespace isobus
 		// This is the static callback for the instance.
 		// See if we need to set up a new managed working set.
 		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> restartedWorkingSet;
+		const auto &messageData = message.get_data();
+		const auto sourceName = message.get_source_control_function()->get_NAME().get_full_name();
+		auto disconnected = std::find(unexpectedlyDisconnectedWorkingSets.begin(),
+		                              unexpectedlyDisconnectedWorkingSets.end(), sourceName);
+		if (disconnected != unexpectedlyDisconnectedWorkingSets.end())
+		{
+			const bool restarting = (messageData[0] == static_cast<std::uint8_t>(Function::WorkingSetMaintenanceMessage)) &&
+			                        (0 != (messageData[1] & 0x01));
+			if (!restarting)
+				return false;
+			unexpectedlyDisconnectedWorkingSets.erase(disconnected);
+		}
 		for (const auto &cf : managedWorkingSetList)
 		{
 			if (cf->contains_control_function(message.get_source_control_function()))
@@ -389,6 +423,77 @@ namespace isobus
 	CANIdentifier::CANPriority VirtualTerminalServer::get_priority() const
 	{
 		return (VTVersion::Version6 == get_version()) ? CANIdentifier::CANPriority::Priority5 : CANIdentifier::CANPriority::PriorityLowest7;
+	}
+
+	std::uint8_t VirtualTerminalServer::next_transaction_byte(
+	  const std::shared_ptr<ControlFunction> &destination) const
+	{
+		if (!destination || get_version() < VTVersion::Version6) return 0xFF;
+		auto workingSet = std::find_if(managedWorkingSetList.begin(), managedWorkingSetList.end(),
+		  [&destination](const auto &ws) { return ws && ws->get_control_function() &&
+		    ws->get_control_function()->get_NAME().get_full_name() == destination->get_NAME().get_full_name(); });
+		if (workingSet == managedWorkingSetList.end() || (*workingSet)->get_version() < 6) return 0xFF;
+		auto &number = transactionNumbers[destination->get_NAME().get_full_name()];
+		const auto result = make_transaction_byte(get_version(), (*workingSet)->get_version(), number);
+		number = static_cast<std::uint8_t>((number + 1U) & 0x0FU);
+		return result;
+	}
+
+	bool VirtualTerminalServer::send_tracked_activation(const std::uint8_t *data,
+	                                                    std::uint32_t length,
+	                                                    const std::shared_ptr<ControlFunction> &destination,
+	                                                    std::uint8_t tanIndex) const
+	{
+		const bool sent = CANNetworkManager::CANNetwork.send_can_message(
+		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+		  data, length, serverInternalControlFunction, destination, get_priority());
+		if (!sent || !destination || get_version() < VTVersion::Version6) return sent;
+		auto ws = std::find_if(managedWorkingSetList.begin(), managedWorkingSetList.end(), [&destination](const auto &candidate) {
+			return candidate && candidate->get_control_function() && candidate->get_control_function()->get_NAME().get_full_name() == destination->get_NAME().get_full_name();
+		});
+		if (ws != managedWorkingSetList.end() && (*ws)->get_version() >= 6) {
+			std::lock_guard<std::mutex> lock(pendingActivationMutex);
+			pendingActivations.push_back({std::vector<std::uint8_t>(data, data + length), destination, tanIndex, 1, SystemTiming::get_timestamp_ms()});
+		}
+		return sent;
+	}
+
+	void VirtualTerminalServer::acknowledge_activation(const CANMessage &message)
+	{
+		const auto &data = message.get_data(); if (data.empty() || !message.get_source_control_function()) return;
+		std::lock_guard<std::mutex> lock(pendingActivationMutex);
+		pendingActivations.erase(std::remove_if(pendingActivations.begin(), pendingActivations.end(), [&](const auto &pending) {
+			if (!pending.destination || pending.data.empty() || pending.data[0] != data[0] || pending.destination->get_NAME().get_full_name() != message.get_source_control_function()->get_NAME().get_full_name()) return false;
+			if (pending.tanIndex != 0xFF)
+				return data.size() > pending.tanIndex && pending.data.size() > pending.tanIndex &&
+				       (data[pending.tanIndex] & 0xF0U) == (pending.data[pending.tanIndex] & 0xF0U);
+			return data.size() >= 3 && pending.data.size() >= 3 && data[1] == pending.data[1] && data[2] == pending.data[2];
+		}), pendingActivations.end());
+	}
+
+	void VirtualTerminalServer::update_activation_transactions()
+	{
+		std::vector<std::shared_ptr<ControlFunction>> failedDestinations;
+		{
+			std::lock_guard<std::mutex> lock(pendingActivationMutex);
+			for (auto it = pendingActivations.begin(); it != pendingActivations.end();) {
+				if (!SystemTiming::time_expired_ms(it->timestamp, 300)) { ++it; continue; }
+				// Annex H permits the original activation followed by up to three retries.
+				if (it->attempts >= 4 || !it->destination) {
+					if (it->destination) failedDestinations.push_back(it->destination);
+					it = pendingActivations.erase(it); continue;
+				}
+				if (CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), it->data.data(), it->data.size(), serverInternalControlFunction, it->destination, get_priority())) ++it->attempts;
+				it->timestamp = SystemTiming::get_timestamp_ms(); ++it;
+			}
+		}
+		for (const auto &destination : failedDestinations) {
+			const auto name = destination->get_NAME().get_full_name();
+			if (std::find(unexpectedlyDisconnectedWorkingSets.begin(), unexpectedlyDisconnectedWorkingSets.end(), name) == unexpectedlyDisconnectedWorkingSets.end())
+				unexpectedlyDisconnectedWorkingSets.push_back(name);
+			auto ws = std::find_if(managedWorkingSetList.begin(), managedWorkingSetList.end(), [&](const auto &candidate) { return candidate && candidate->get_control_function() && candidate->get_control_function()->get_NAME().get_full_name() == name; });
+			if (ws != managedWorkingSetList.end()) { suspend_working_set(*ws); (*ws)->request_deletion(); }
+		}
 	}
 
 	std::uint8_t VirtualTerminalServer::get_vt_version_byte(VTVersion version)
@@ -859,7 +964,11 @@ namespace isobus
 					versionLabel.push_back(data[i + 1]);
 				}
 
-				bool wasDeleted = delete_version(versionLabel, managedWorkingSet->get_control_function()->get_NAME());
+				const bool wildcard = (versionLabel[0] == '*') &&
+				  std::all_of(versionLabel.begin() + 1, versionLabel.end(), [](std::uint8_t value) { return value == 0x20; });
+				const bool wasDeleted = (wildcard && get_version() >= VTVersion::Version6)
+				  ? delete_all_versions(managedWorkingSet->get_control_function()->get_NAME())
+				  : delete_version(versionLabel, managedWorkingSet->get_control_function()->get_NAME());
 
 				if (wasDeleted)
 				{
@@ -2377,7 +2486,7 @@ namespace isobus
 					activeWorkingSetDataMaskObjectID = targetObject->get_active_mask();
 					onChangeActiveMaskEventDispatcher.call(*target, targetObject->get_id(), targetObject->get_active_mask());
 				}
-				const std::array<std::uint8_t, 8> response = { static_cast<std::uint8_t>(Function::SelectActiveWorkingSet), error, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+				const auto response = make_select_active_working_set_response(error);
 				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), response.data(), response.size(), serverInternalControlFunction, message.get_source_control_function(), get_priority());
 			}
 			break;
@@ -2444,7 +2553,7 @@ namespace isobus
 			case Function::VTChangeStringValueMessage:
 			case Function::VTControlAudioSignalTerminationMessage:
 			{
-				// Todo, do something with the responses
+				acknowledge_activation(message);
 			}
 			break;
 
@@ -2633,12 +2742,7 @@ namespace isobus
 				0xFF
 			};
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), buffer.data(), CAN_DATA_LENGTH, serverInternalControlFunction, destination, get_priority());
 		}
 		return retVal;
 	}
@@ -2660,12 +2764,7 @@ namespace isobus
 				0xFF
 			};
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), buffer.data(), CAN_DATA_LENGTH, serverInternalControlFunction, destination, get_priority());
 		}
 		return retVal;
 	}
@@ -2687,12 +2786,7 @@ namespace isobus
 				0xFF
 			};
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), buffer.data(), CAN_DATA_LENGTH, serverInternalControlFunction, destination, get_priority());
 		}
 		return retVal;
 	}
@@ -2714,12 +2808,7 @@ namespace isobus
 			buffer[6] = 0xFF;
 			buffer[7] = 0xFF;
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), buffer.data(), CAN_DATA_LENGTH, serverInternalControlFunction, destination, get_priority());
 		}
 		return retVal;
 	}
@@ -2870,14 +2959,9 @@ namespace isobus
 			buffer[4] = get_low_byte(parentObjectId);
 			buffer[5] = get_high_byte(parentObjectId);
 			buffer[6] = keyNumber;
-			buffer[7] = 0xFF; // Reserved TODO: TAN
+			buffer[7] = next_transaction_byte(destination);
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = send_tracked_activation(buffer.data(), CAN_DATA_LENGTH, destination, 7);
 		}
 		return retVal;
 	}
@@ -2892,19 +2976,14 @@ namespace isobus
 				static_cast<std::uint8_t>(Function::VTChangeNumericValueMessage),
 				get_low_byte(objectId),
 				get_high_byte(objectId),
-				0xFF, // TODO: TAN, version 6
+				next_transaction_byte(destination),
 				get_byte(value, 0),
 				get_byte(value, 1),
 				get_byte(value, 2),
 				get_byte(value, 3)
 			};
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = send_tracked_activation(buffer.data(), CAN_DATA_LENGTH, destination, 3);
 		}
 		return retVal;
 	}
@@ -2923,15 +3002,10 @@ namespace isobus
 				static_cast<std::uint8_t>(isObjectOpenForInput),
 				0xFF,
 				0xFF,
-				0xFF // Reserved TODO: TAN
+				next_transaction_byte(destination)
 			};
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = send_tracked_activation(buffer.data(), CAN_DATA_LENGTH, destination, 7);
 		}
 		return retVal;
 	}
@@ -2950,15 +3024,10 @@ namespace isobus
 				get_low_byte(parentObjectId),
 				get_high_byte(parentObjectId),
 				keyNumber,
-				0xFF // Reserved TODO: TAN
+				next_transaction_byte(destination)
 			};
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        CAN_DATA_LENGTH,
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = send_tracked_activation(buffer.data(), CAN_DATA_LENGTH, destination, 7);
 		}
 		return retVal;
 	}
@@ -2991,12 +3060,7 @@ namespace isobus
 				buffer.push_back(0xFF); // The standard specifies the message must be padded to 8 bytes
 			}
 
-			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-			                                                        buffer.data(),
-			                                                        static_cast<std::uint32_t>(buffer.size()),
-			                                                        serverInternalControlFunction,
-			                                                        destination,
-			                                                        get_priority());
+			retVal = send_tracked_activation(buffer.data(), static_cast<std::uint32_t>(buffer.size()), destination, 0xFF);
 		}
 		return retVal;
 	}
@@ -3839,16 +3903,7 @@ namespace isobus
 
 	bool VirtualTerminalServer::send_capture_screen_response(std::uint8_t item, std::uint8_t path, std::uint8_t errorCode, std::uint16_t imageId, std::shared_ptr<ControlFunction> requestor) const
 	{
-		std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
-
-		buffer[0] = static_cast<std::uint8_t>(Function::ScreenCapture);
-		buffer[1] = item;
-		buffer[2] = path;
-		buffer[3] = errorCode;
-		buffer[4] = get_low_byte(imageId);
-		buffer[5] = get_high_byte(imageId);
-		buffer[6] = 0xFF;
-		buffer[7] = 0xFF;
+		const auto buffer = make_screen_capture_response(item, path, errorCode, imageId);
 		return CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 		                                                      buffer.data(),
 		                                                      CAN_DATA_LENGTH,
@@ -3860,6 +3915,7 @@ namespace isobus
 	void VirtualTerminalServer::update()
 	{
 		update_auxiliary_assignments();
+		update_activation_transactions();
 		if ((isobus::SystemTiming::time_expired_ms(statusMessageTimestamp_ms, 1000)) &&
 		    (send_status_message()))
 		{
