@@ -107,11 +107,14 @@ namespace isobus
 
 		/// @brief Sets the object ID of the currently focused object
 		/// @param[in] objectID The object ID to set as the focused object
-		void set_object_focus(std::uint16_t objectID);
+		void set_object_focus(std::uint16_t objectID, bool openForInput = false);
 
 		/// @brief Returns the object ID of the currently focused object
 		/// @returns The object ID of the currently focused object
 		std::uint16_t get_object_focus() const;
+
+		/// @brief Returns whether the focused object is currently open for input.
+		bool get_is_object_open_for_input() const;
 
 		/// @brief Sets the timestamp for when we received the last auxiliary input maintenance message
 		/// from the client.
@@ -162,6 +165,7 @@ namespace isobus
 		std::uint32_t workingSetMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track sending of the maintenance message
 		std::uint32_t auxiliaryInputMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track if/when the working set sent an auxiliary input maintenance message
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
+		bool focusedObjectOpenForInput = false; ///< True while the focused input object is being edited
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
 		std::uint8_t pendingLoadVersionResponseFunction = 0; ///< D1 or D5 response to send after parsing
 		bool workingSetDeletionRequested = false; ///< Used to tell the server to delete this working set

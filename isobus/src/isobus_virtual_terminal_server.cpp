@@ -1907,7 +1907,7 @@ namespace isobus
 							if (0 == data[3])
 							{
 								// 0 in Version 4+ means to activate the object for input
-								managedWorkingSet->set_object_focus(objectID);
+								managedWorkingSet->set_object_focus(objectID, true);
 								LOG_DEBUG("[VT Server]: Client %u select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
 								onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, true);
 								send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsOpenedForEdit, message.get_source_control_function());
@@ -2135,6 +2135,29 @@ namespace isobus
 			case Function::ControlAudioSignalCommand:
 			{
 				send_audio_signal_successful(message.get_source_control_function());
+			}
+			break;
+
+			case Function::ESCCommand:
+			{
+				const auto focusedObjectID = managedWorkingSet->get_object_focus();
+				if ((NULL_OBJECT_ID == focusedObjectID) ||
+				    (!managedWorkingSet->get_is_object_open_for_input()))
+				{
+					send_esc_response(NULL_OBJECT_ID,
+					                  static_cast<std::uint8_t>(ESCMessageErrorCode::NoInputFieldOpen),
+					                  message.get_source_control_function());
+					break;
+				}
+
+				auto focusedObject = managedWorkingSet->get_object_by_id(focusedObjectID);
+				managedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+				onFocusObjectEventDispatcher.call(managedWorkingSet, NULL_OBJECT_ID, false);
+				if (nullptr != focusedObject)
+				{
+					process_macro(focusedObject, EventID::OnESC, focusedObject->get_object_type(), managedWorkingSet);
+				}
+				send_esc_response(focusedObjectID, 0, message.get_source_control_function());
 			}
 			break;
 
@@ -3108,6 +3131,20 @@ namespace isobus
 		                                                      serverInternalControlFunction,
 		                                                      destination,
 		                                                      get_priority());
+	}
+
+	bool VirtualTerminalServer::send_esc_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+		  static_cast<std::uint8_t>(Function::ESCCommand),
+		  static_cast<std::uint8_t>(objectID & 0xFF),
+		  static_cast<std::uint8_t>(objectID >> 8),
+		  errorBitfield,
+		  0xFF, 0xFF, 0xFF, 0xFF
+		};
+		return CANNetworkManager::CANNetwork.send_can_message(
+		  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+		  buffer.data(), buffer.size(), serverInternalControlFunction, destination, get_priority());
 	}
 
 	bool VirtualTerminalServer::send_status_message() const

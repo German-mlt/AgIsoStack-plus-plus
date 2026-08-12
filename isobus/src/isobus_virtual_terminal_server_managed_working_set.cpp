@@ -140,14 +140,20 @@ namespace isobus
 		pendingLoadVersionResponseFunction = value;
 	}
 
-	void VirtualTerminalServerManagedWorkingSet::set_object_focus(std::uint16_t objectID)
+	void VirtualTerminalServerManagedWorkingSet::set_object_focus(std::uint16_t objectID, bool openForInput)
 	{
 		focusedObject = objectID;
+		focusedObjectOpenForInput = (NULL_OBJECT_ID != objectID) && openForInput;
 	}
 
 	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_object_focus() const
 	{
 		return focusedObject;
+	}
+
+	bool VirtualTerminalServerManagedWorkingSet::get_is_object_open_for_input() const
+	{
+		return focusedObjectOpenForInput;
 	}
 
 	void VirtualTerminalServerManagedWorkingSet::set_auxiliary_input_maintenance_timestamp_ms(std::uint32_t value)
