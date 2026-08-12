@@ -52,6 +52,7 @@ namespace isobus
 		ColourPalette = 45, ///< Used to replace the VT standard colour palette
 		PictureGraphic = 20, ///< Used to output a picture graphic (bitmap).
 		GraphicData = 46, ///< Used to define the data for a graphic image
+		WorkingSetSpecialControls = 47, ///< Defines initial VT6 colour and locale controls
 		ScaledGraphic = 48, ///< Used to display a scaled representation of a graphic object
 		NumberVariable = 21, ///< Used to store a 32-bit unsigned integer value.
 		StringVariable = 22, ///< Used to store a fixed length string value.
@@ -4107,6 +4108,30 @@ namespace isobus
 		const std::vector<std::uint8_t> &get_raw_data() const;
 	private:
 		std::vector<std::uint8_t> rawData;
+	};
+
+	class WorkingSetSpecialControls : public VTObject
+	{
+	public:
+		struct LanguagePair { std::array<char, 2> language{}; std::array<char, 2> country{}; };
+		enum class AttributeName : std::uint8_t { Type = 0, NumberOfBytes = 1, ColourMap = 2, ColourPalette = 3, NumberOfAttributes = 4 };
+		VirtualTerminalObjectType get_object_type() const override;
+		std::uint32_t get_minumum_object_length() const override;
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const override;
+		bool set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &) override;
+		bool get_attribute(std::uint8_t, std::uint32_t &) const override;
+		void set_colour_map(std::uint16_t value) { colourMap = value; }
+		void set_colour_palette(std::uint16_t value) { colourPalette = value; }
+		std::uint16_t get_colour_map() const { return colourMap; }
+		std::uint16_t get_colour_palette() const { return colourPalette; }
+		void set_number_of_bytes(std::uint16_t value) { numberOfBytes = value; }
+		void add_language_pair(LanguagePair value) { languages.push_back(value); }
+		const std::vector<LanguagePair> &get_language_pairs() const { return languages; }
+	private:
+		std::uint16_t numberOfBytes = 5;
+		std::uint16_t colourMap = NULL_OBJECT_ID;
+		std::uint16_t colourPalette = NULL_OBJECT_ID;
+		std::vector<LanguagePair> languages;
 	};
 
 	/// @brief Defines a window mask object

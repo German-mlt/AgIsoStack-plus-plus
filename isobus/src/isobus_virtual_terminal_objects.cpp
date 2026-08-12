@@ -7844,6 +7844,35 @@ namespace isobus
 	void GraphicData::set_raw_data(std::vector<std::uint8_t> value) { rawData = std::move(value); }
 	const std::vector<std::uint8_t> &GraphicData::get_raw_data() const { return rawData; }
 
+	VirtualTerminalObjectType WorkingSetSpecialControls::get_object_type() const { return VirtualTerminalObjectType::WorkingSetSpecialControls; }
+	std::uint32_t WorkingSetSpecialControls::get_minumum_object_length() const { return 10; }
+	bool WorkingSetSpecialControls::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &pool) const
+	{
+		const auto validReference = [&pool](std::uint16_t id, VirtualTerminalObjectType type) {
+			if (NULL_OBJECT_ID == id) return true;
+			auto object = pool.find(id);
+			return (pool.end() != object) && object->second && (type == object->second->get_object_type());
+		};
+		return (NULL_OBJECT_ID != objectID) && (numberOfBytes >= 5) &&
+		       validReference(colourMap, VirtualTerminalObjectType::ColourMap) &&
+		       validReference(colourPalette, VirtualTerminalObjectType::ColourPalette);
+	}
+	bool WorkingSetSpecialControls::set_attribute(std::uint8_t, std::uint32_t,
+	                                             const std::map<std::uint16_t, std::shared_ptr<VTObject>> &,
+	                                             AttributeError &error)
+	{
+		error = AttributeError::InvalidAttributeID; return false;
+	}
+	bool WorkingSetSpecialControls::get_attribute(std::uint8_t aid, std::uint32_t &raw) const
+	{
+		if (aid == 0) raw = static_cast<std::uint8_t>(get_object_type());
+		else if (aid == 1) raw = numberOfBytes;
+		else if (aid == 2) raw = colourMap;
+		else if (aid == 3) raw = colourPalette;
+		else return false;
+		return true;
+	}
+
 	VirtualTerminalObjectType WindowMask::get_object_type() const
 	{
 		return VirtualTerminalObjectType::WindowMask;

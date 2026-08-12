@@ -129,6 +129,7 @@ namespace isobus
 		if (NULL_OBJECT_ID == objectID)
 		{
 			selectedColourMap = NULL_OBJECT_ID;
+			for (auto &entry : vtObjectTree) if (entry.second && entry.second->get_object_type() == VirtualTerminalObjectType::WorkingSetSpecialControls) std::static_pointer_cast<WorkingSetSpecialControls>(entry.second)->set_colour_map(objectID);
 			return true;
 		}
 		auto object = vtObjectTree.find(objectID);
@@ -137,6 +138,7 @@ namespace isobus
 		    !object->second->get_is_valid(vtObjectTree))
 			return false;
 		selectedColourMap = objectID;
+		for (auto &entry : vtObjectTree) if (entry.second && entry.second->get_object_type() == VirtualTerminalObjectType::WorkingSetSpecialControls) std::static_pointer_cast<WorkingSetSpecialControls>(entry.second)->set_colour_map(objectID);
 		return true;
 	}
 
@@ -147,12 +149,13 @@ namespace isobus
 
 	bool VirtualTerminalWorkingSetBase::select_colour_palette(std::uint16_t objectID)
 	{
-		if (NULL_OBJECT_ID == objectID) { selectedColourPalette = NULL_OBJECT_ID; return true; }
+		if (NULL_OBJECT_ID == objectID) { selectedColourPalette = NULL_OBJECT_ID; for (auto &entry : vtObjectTree) if (entry.second && entry.second->get_object_type() == VirtualTerminalObjectType::WorkingSetSpecialControls) std::static_pointer_cast<WorkingSetSpecialControls>(entry.second)->set_colour_palette(objectID); return true; }
 		auto object = vtObjectTree.find(objectID);
 		if ((vtObjectTree.end() == object) || !object->second ||
 		    (VirtualTerminalObjectType::ColourPalette != object->second->get_object_type()) ||
 		    !object->second->get_is_valid(vtObjectTree)) return false;
 		selectedColourPalette = objectID;
+		for (auto &entry : vtObjectTree) if (entry.second && entry.second->get_object_type() == VirtualTerminalObjectType::WorkingSetSpecialControls) std::static_pointer_cast<WorkingSetSpecialControls>(entry.second)->set_colour_palette(objectID);
 		return true;
 	}
 
@@ -2114,6 +2117,37 @@ namespace isobus
 				}
 				break;
 
+			case VirtualTerminalObjectType::WorkingSetSpecialControls:
+				{
+					auto object = std::make_shared<WorkingSetSpecialControls>();
+					if (iopLength >= object->get_minumum_object_length())
+					{
+						const auto bytes = get_little_endian_uint16(iopData, 3);
+						const std::uint32_t length = 5U + bytes;
+						const auto count = iopData[9];
+						if ((bytes >= 5) && (length <= iopLength) &&
+						    (static_cast<std::uint32_t>(5U + count * 4U) <= bytes))
+						{
+							bool unique = true;
+							for (const auto &entry : vtObjectTree)
+								if (entry.second && entry.second->get_object_type() == VirtualTerminalObjectType::WorkingSetSpecialControls) unique = false;
+							if (!unique) break;
+							object->set_id(decodedID); object->set_number_of_bytes(bytes);
+							object->set_colour_map(get_little_endian_uint16(iopData, 5));
+							object->set_colour_palette(get_little_endian_uint16(iopData, 7));
+							for (std::uint16_t index = 0; index < count; ++index)
+							{
+								const auto offset = 10U + index * 4U;
+								object->add_language_pair({{static_cast<char>(iopData[offset]), static_cast<char>(iopData[offset + 1])},
+								                           {static_cast<char>(iopData[offset + 2]), static_cast<char>(iopData[offset + 3])}});
+							}
+							iopData += length; iopLength -= length;
+							retVal = add_or_replace_object(object);
+						}
+					}
+				}
+				break;
+
 				case VirtualTerminalObjectType::ObjectLabelRefrenceList:
 				{
 					auto object = std::make_shared<ObjectLabelReferenceList>();
@@ -2709,6 +2743,19 @@ namespace isobus
 		else
 		{
 			retVal = false;
+		}
+		if (retVal)
+		{
+			for (const auto &entry : vtObjectTree)
+			{
+				if (!entry.second || entry.second->get_object_type() != VirtualTerminalObjectType::WorkingSetSpecialControls) continue;
+				auto controls = std::static_pointer_cast<WorkingSetSpecialControls>(entry.second);
+				if (controls->get_is_valid(vtObjectTree))
+				{
+					select_colour_map(controls->get_colour_map());
+					select_colour_palette(controls->get_colour_palette());
+				}
+			}
 		}
 		return retVal;
 	}
