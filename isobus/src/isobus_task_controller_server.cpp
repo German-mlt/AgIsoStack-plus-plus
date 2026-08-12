@@ -408,6 +408,7 @@ namespace isobus
 													LOG_INFO("[TC Server]: Client %hhu requests object pool transfer of %u bytes", rxMessage.get_source_control_function()->get_address(), requestedSize);
 
 													get_active_client(rxMessage.get_source_control_function())->clientDDOPsize_bytes = requestedSize;
+													get_active_client(rxMessage.get_source_control_function())->numberOfObjectPoolSegments = 0;
 													send_request_object_pool_transfer_response(rxMessage.get_source_control_function(), true);
 												}
 												else
@@ -439,6 +440,7 @@ namespace isobus
 
 												if (store_device_descriptor_object_pool(rxMessage.get_source_control_function(), objectPool, 0 != get_active_client(rxMessage.get_source_control_function())->numberOfObjectPoolSegments))
 												{
+													get_active_client(rxMessage.get_source_control_function())->numberOfObjectPoolSegments++;
 													LOG_INFO("[TC Server]: Stored DDOP segment for client %hhu", rxMessage.get_source_control_function()->get_address());
 													send_object_pool_transfer_response(rxMessage.get_source_control_function(), 0, static_cast<std::uint32_t>(objectPool.size())); // No error, transfer OK
 												}
