@@ -288,14 +288,35 @@ namespace isobus
 
 		// This is the static callback for the instance.
 		// See if we need to set up a new managed working set.
+		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> restartedWorkingSet;
 		for (const auto &cf : managedWorkingSetList)
 		{
 			if (cf->contains_control_function(message.get_source_control_function()))
 			{
-				// Found a match
-				retVal = true;
+				const auto &data = message.get_data();
+				const bool repeatedInitiatingMaintenance =
+				  cf->is_master(message.get_source_control_function()) &&
+				  (data[0] == static_cast<std::uint8_t>(Function::WorkingSetMaintenanceMessage)) &&
+				  (0 != (data[1] & 0x01));
+				if (repeatedInitiatingMaintenance)
+				{
+					restartedWorkingSet = cf;
+				}
+				else
+				{
+					retVal = !cf->is_deletion_requested();
+				}
 				break;
 			}
+		}
+
+		if (nullptr != restartedWorkingSet)
+		{
+			LOG_WARNING("[VT Server]: Working Set %u restarted; suspending its previous object pool.", restartedWorkingSet->get_control_function()->get_address());
+			suspend_working_set(restartedWorkingSet);
+			managedWorkingSetList.erase(
+			  std::remove(managedWorkingSetList.begin(), managedWorkingSetList.end(), restartedWorkingSet),
+			  managedWorkingSetList.end());
 		}
 
 		if (!retVal)
