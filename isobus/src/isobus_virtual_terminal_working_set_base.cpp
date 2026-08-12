@@ -2671,7 +2671,9 @@ namespace isobus
 			// If the first byte is 255, then more bytes are used! 4.6.22.3
 			if (iopData[0] == static_cast<std::uint8_t>(EventID::UseExtendedMacroReference))
 			{
-				if (iopLength < 4)
+				// An extended reference occupies two of the two-byte groupings
+				// counted by Number of Macros to Follow (ISO 11783-6 4.6.22.3).
+				if ((i + 1 >= numberOfMacrosToFollow) || (iopLength < 4))
 				{
 					LOG_ERROR("[WS]: Not enough IOP data to parse extended macro reference #%u for object %s", i, isobus::to_string(static_cast<int>(object->get_id())).c_str());
 					return false;
@@ -2694,6 +2696,7 @@ namespace isobus
 				}
 				iopLength -= 4;
 				iopData += 4;
+				++i;
 			}
 			else
 			{
