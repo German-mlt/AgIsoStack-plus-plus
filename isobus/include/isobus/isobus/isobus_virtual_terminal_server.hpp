@@ -178,6 +178,11 @@ namespace isobus
 		/// @brief The interface calls this function when it wants you to discontinue/suspend a working set
 		/// @param[in] workingSetWithError The working set to suspend
 		virtual void suspend_working_set(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSetWithError) = 0;
+		virtual std::uint8_t control_audio_signal(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet,
+		                                          std::uint8_t activations, std::uint16_t frequencyHz,
+		                                          std::uint16_t onTimeMs, std::uint16_t offTimeMs) = 0;
+		virtual std::uint8_t set_audio_volume(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet,
+		                                      std::uint8_t volumePercent) = 0;
 
 		/// @brief This function is called when the interface needs to know the wide chars you support
 		/// @param[in] codePlane The code plane to inquire about
@@ -804,12 +809,12 @@ namespace isobus
 		/// @brief Sends the Control Audio Signal response to the client with "No errors" error code
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false.
-		bool send_audio_signal_successful(std::shared_ptr<ControlFunction> destination) const;
+		bool send_audio_signal_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends the Set Audio Volume response to the client with "No error" error code
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false.
-		bool send_audio_volume_response(std::shared_ptr<ControlFunction> destination) const;
+		bool send_audio_volume_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response message to the Screen capture command
 		/// @param[in] item Item requested from the Screen Capture command

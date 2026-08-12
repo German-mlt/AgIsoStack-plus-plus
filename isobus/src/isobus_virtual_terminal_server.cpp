@@ -2155,7 +2155,10 @@ namespace isobus
 
 			case Function::ControlAudioSignalCommand:
 			{
-				send_audio_signal_successful(message.get_source_control_function());
+				const auto error = control_audio_signal(
+				  managedWorkingSet, data[1], get_little_endian_uint16(data, 2),
+				  get_little_endian_uint16(data, 4), get_little_endian_uint16(data, 6));
+				send_audio_signal_response(error, message.get_source_control_function());
 			}
 			break;
 
@@ -2184,7 +2187,10 @@ namespace isobus
 
 			case Function::SetAudioVolumeCommand:
 			{
-				send_audio_volume_response(message.get_source_control_function());
+				const auto error = (data[1] <= 100)
+				  ? set_audio_volume(managedWorkingSet, data[1])
+				  : static_cast<std::uint8_t>(0x10);
+				send_audio_volume_response(error, message.get_source_control_function());
 			}
 			break;
 
@@ -3206,9 +3212,9 @@ namespace isobus
 		                                                      get_priority());
 	}
 
-	bool VirtualTerminalServer::send_audio_signal_successful(std::shared_ptr<ControlFunction> destination) const
+	bool VirtualTerminalServer::send_audio_signal_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
 	{
-		std::vector<std::uint8_t> buffer = { static_cast<std::uint8_t>(Function::ControlAudioSignalCommand), 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+		std::vector<std::uint8_t> buffer = { static_cast<std::uint8_t>(Function::ControlAudioSignalCommand), errorBitfield, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 		return CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 		                                                      buffer.data(),
 		                                                      CAN_DATA_LENGTH,
@@ -3238,9 +3244,9 @@ namespace isobus
 		                                                      get_priority());
 	}
 
-	bool VirtualTerminalServer::send_audio_volume_response(std::shared_ptr<ControlFunction> destination) const
+	bool VirtualTerminalServer::send_audio_volume_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
 	{
-		std::vector<std::uint8_t> buffer = { static_cast<std::uint8_t>(Function::SetAudioVolumeCommand), 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+		std::vector<std::uint8_t> buffer = { static_cast<std::uint8_t>(Function::SetAudioVolumeCommand), errorBitfield, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 		return CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 		                                                      buffer.data(),
 		                                                      CAN_DATA_LENGTH,
