@@ -397,6 +397,10 @@ namespace isobus
 		/// @returns true if cconnected, false otherwise
 		bool get_is_connected() const;
 
+		/// @brief Returns the current connection state for diagnostics and
+		/// application status indication.
+		StateMachineState get_state_machine_state() const;
+
 		/// @brief Terminates the client and joins the worker thread if applicable
 		void terminate();
 

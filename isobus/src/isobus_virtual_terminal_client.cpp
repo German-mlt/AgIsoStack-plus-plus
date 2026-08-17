@@ -80,6 +80,11 @@ namespace isobus
 		return (StateMachineState::Connected == state);
 	}
 
+	VirtualTerminalClient::StateMachineState VirtualTerminalClient::get_state_machine_state() const
+	{
+		return state;
+	}
+
 	void VirtualTerminalClient::terminate()
 	{
 		if (initialized)
