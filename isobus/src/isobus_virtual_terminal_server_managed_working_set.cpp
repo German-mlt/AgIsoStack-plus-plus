@@ -39,6 +39,9 @@ namespace isobus
 	{
 		if (nullptr == objectPoolProcessingThread)
 		{
+			// Publish ownership before launching; otherwise the previous Joined
+			// state can expose the tree while a second parse is starting.
+			set_object_pool_processing_state(ObjectPoolProcessingThreadState::Running);
 			objectPoolProcessingThread.reset(new std::thread([this]() { worker_thread_function(); }));
 		}
 	}

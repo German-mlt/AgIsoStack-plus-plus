@@ -318,6 +318,7 @@ namespace isobus
 		if (disconnected != unexpectedlyDisconnectedWorkingSets.end())
 		{
 			const bool restarting = (messageData[0] == static_cast<std::uint8_t>(Function::WorkingSetMaintenanceMessage)) &&
+			                        (messageData[2] != 0xFF) &&
 			                        (0 != (messageData[1] & 0x01));
 			if (!restarting)
 				return false;
@@ -331,6 +332,7 @@ namespace isobus
 				const bool repeatedInitiatingMaintenance =
 				  cf->is_master(message.get_source_control_function()) &&
 				  (data[0] == static_cast<std::uint8_t>(Function::WorkingSetMaintenanceMessage)) &&
+				  (data[2] != 0xFF) &&
 				  (0 != (data[1] & 0x01));
 				if (repeatedInitiatingMaintenance)
 				{
@@ -357,7 +359,7 @@ namespace isobus
 		{
 			const auto &data = message.get_data();
 			if ((data[0] == static_cast<std::uint8_t>(Function::WorkingSetMaintenanceMessage)) &&
-			    (data[1] & 0x01)) // Init bit is set
+			    ((data[2] == 0xFF) || (data[1] & 0x01))) // G.3: VT2 uses reserved FF flags, not an initiating bit
 			{
 				// This CF is probably trying to initiate communication with us.
 				managedWorkingSetList.emplace_back(std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function()));
