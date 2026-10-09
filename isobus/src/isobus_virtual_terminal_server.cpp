@@ -197,7 +197,7 @@ namespace isobus
 	bool VirtualTerminalServer::should_route_response_to_originator(VTVersion vtVersion,
 	                                                               std::uint8_t workingSetVersion)
 	{
-		return (vtVersion >= VTVersion::Version4) && (workingSetVersion >= 4);
+		return (vtVersion >= VTVersion::Version4) && (workingSetVersion >= 4) && (workingSetVersion != 0xFF);
 	}
 
 	std::array<std::uint8_t, CAN_DATA_LENGTH> VirtualTerminalServer::make_identify_vt_response()
@@ -210,7 +210,7 @@ namespace isobus
 	  VTVersion vtVersion, std::uint8_t workingSetVersion,
 	  std::uint8_t transactionNumber)
 	{
-		return ((vtVersion >= VTVersion::Version6) && (workingSetVersion >= 6))
+		return ((vtVersion >= VTVersion::Version6) && (workingSetVersion >= 6) && (workingSetVersion != 0xFF))
 		  ? static_cast<std::uint8_t>(((transactionNumber & 0x0FU) << 4U) | 0x0FU)
 		  : 0xFF;
 	}
@@ -358,6 +358,18 @@ namespace isobus
 		if (!retVal)
 		{
 			const auto &data = message.get_data();
+            // Legacy clients can query cached versions before their first heartbeat.
+            // Establish the provisional WS so Get Versions and a following Load
+            // Version can run; maintenance supplies its actual version afterward.
+            if (data[0] == static_cast<std::uint8_t>(Function::GetVersionsMessage) &&
+                message.get_destination_control_function() == serverInternalControlFunction)
+            {
+                auto ws = std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function());
+                ws->set_version(2);
+                ws->set_working_set_maintenance_message_timestamp_ms(SystemTiming::get_timestamp_ms());
+                managedWorkingSetList.push_back(ws);
+                return true;
+            }
 			if ((data[0] == static_cast<std::uint8_t>(Function::WorkingSetMaintenanceMessage)) &&
 			    ((data[2] == 0xFF) || (data[1] & 0x01))) // G.3: VT2 uses reserved FF flags, not an initiating bit
 			{
@@ -3001,7 +3013,16 @@ namespace isobus
 				get_low_byte(objectId),
 				get_high_byte(objectId),
 				static_cast<std::uint8_t>(isObjectSelected),
-				static_cast<std::uint8_t>(isObjectOpenForInput),
+                [&]() -> std::uint8_t {
+                    const auto ws = std::find_if(managedWorkingSetList.begin(), managedWorkingSetList.end(),
+                        [&destination](const auto &candidate) {
+                            return candidate && candidate->get_control_function() &&
+                                candidate->get_control_function()->get_NAME().get_full_name() ==
+                                    destination->get_NAME().get_full_name();
+                        });
+                    return ws != managedWorkingSetList.end() && (*ws)->get_version() < 4
+                        ? 0xFF : static_cast<std::uint8_t>(isObjectOpenForInput);
+                }(),
 				0xFF,
 				0xFF,
 				next_transaction_byte(destination)

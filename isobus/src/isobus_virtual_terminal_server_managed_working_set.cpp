@@ -100,7 +100,11 @@ namespace isobus
 
 	std::uint8_t VirtualTerminalServerManagedWorkingSet::get_expected_member_count() const { return expectedMemberCount; }
 	const std::vector<NAME> &VirtualTerminalServerManagedWorkingSet::get_member_names() const { return memberNames; }
-	void VirtualTerminalServerManagedWorkingSet::set_version(std::uint8_t value) { workingSetVersion = value; }
+	void VirtualTerminalServerManagedWorkingSet::set_version(std::uint8_t value)
+	{
+		// ISO 11783-6 G.3: FF denotes VT version 2 and prior.
+		workingSetVersion = (value == 0xFF) ? 2 : value;
+	}
 	std::uint8_t VirtualTerminalServerManagedWorkingSet::get_version() const { return workingSetVersion; }
 
 	std::uint32_t VirtualTerminalServerManagedWorkingSet::get_working_set_maintenance_message_timestamp_ms() const
