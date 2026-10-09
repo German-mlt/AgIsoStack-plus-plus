@@ -54,6 +54,7 @@ namespace isobus
 				partnerControlFunction->add_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::Acknowledge), process_rx_message, this);
 				CANNetworkManager::CANNetwork.add_global_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), process_rx_message, this);
 				CANNetworkManager::CANNetwork.add_global_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal), process_rx_message, this);
+				CANNetworkManager::CANNetwork.add_global_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::Acknowledge), process_rx_message, this);
 			}
 
 			if (!languageCommandInterface.get_initialized())
@@ -100,6 +101,7 @@ namespace isobus
 				partnerControlFunction->remove_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::Acknowledge), process_rx_message, this);
 				CANNetworkManager::CANNetwork.remove_global_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU), process_rx_message, this);
 				CANNetworkManager::CANNetwork.remove_global_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal), process_rx_message, this);
+				CANNetworkManager::CANNetwork.remove_global_parameter_group_number_callback(static_cast<std::uint32_t>(CANLibParameterGroupNumber::Acknowledge), process_rx_message, this);
 			}
 
 			shouldTerminate = true;
@@ -2185,6 +2187,17 @@ namespace isobus
 	void VirtualTerminalClient::process_rx_message(const CANMessage &message, void *parentPointer)
 	{
 		auto parentVT = static_cast<VirtualTerminalClient *>(parentPointer);
+        if (!parentVT) return;
+        const auto pgn = message.get_identifier().get_parameter_group_number();
+        // Broadcast VT traffic must belong to the selected partner NAME.
+        // Otherwise a second VT keeps this session alive while its VT is offline.
+        if ((pgn == static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU) ||
+             pgn == static_cast<std::uint32_t>(CANLibParameterGroupNumber::Acknowledge)) &&
+            (!parentVT->partnerControlFunction ||
+             message.get_source_control_function() != parentVT->partnerControlFunction ||
+             message.get_can_port_index() != parentVT->myControlFunction->get_can_port()))
+            return;
+
 		if ((nullptr != parentPointer) &&
 		    (CAN_DATA_LENGTH <= message.get_data_length()) &&
 		    ((nullptr == message.get_destination_control_function()) ||
@@ -2194,6 +2207,12 @@ namespace isobus
 			{
 				case static_cast<std::uint32_t>(CANLibParameterGroupNumber::Acknowledge):
 				{
+                    // J1939 global ACK/NACK embeds the destination in byte 5.
+                    // A NACK for another ECU must not reset our connection.
+                    if (!message.get_destination_control_function() &&
+                        message.get_uint8_at(4) != parentVT->myControlFunction->get_address())
+                        break;
+
 					if (AcknowledgementType::Negative == static_cast<AcknowledgementType>(message.get_uint8_at(0)))
 					{
 						std::uint32_t targetParameterGroupNumber = message.get_uint24_at(5);

@@ -172,7 +172,7 @@ TEST_F(VirtualTerminalTest, VTStatusMessage)
 	                         0xFF, // Busy codes
 	                         1, // VT Function code that is being executed
 	                       },
-	                       nullptr,
+	                       vtPartner,
 	                       nullptr,
 	                       0);
 
@@ -189,6 +189,54 @@ TEST_F(VirtualTerminalTest, VTStatusMessage)
 	CANNetworkManager::CANNetwork.deactivate_control_function(vtPartner);
 	CANNetworkManager::CANNetwork.deactivate_control_function(internalECU);
 }
+
+TEST_F(VirtualTerminalTest, SelectedVTBroadcastsAndGlobalNack)
+{
+    auto ecu = test_helpers::create_mock_internal_control_function(0x80);
+    auto vt = test_helpers::force_claim_partnered_control_function(0x26, 0);
+    auto otherVT = test_helpers::create_mock_control_function(0x2E);
+    DerivedTestVTClient client(vt, ecu);
+    const auto status = [&](std::shared_ptr<ControlFunction> source, std::uint16_t mask) {
+        CANIdentifier id(CANIdentifier::Type::Extended,
+            static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+            CANIdentifier::CANPriority::PriorityDefault6, 0xFF, source->get_address());
+        CANMessage message(CANMessage::Type::Receive, id,
+            {0xFE, 0x80, static_cast<std::uint8_t>(mask), static_cast<std::uint8_t>(mask >> 8),
+             0xFF, 0xFF, 0, 0}, source, nullptr, 0);
+        client.test_wrapper_process_rx_message(message, &client);
+    };
+    client.test_wrapper_set_state(VirtualTerminalClient::StateMachineState::Connected);
+    status(vt, 1234);
+    EXPECT_EQ(1234, client.get_visible_data_mask());
+    time_source.simulate_delay_ms(2000);
+    status(otherVT, 5678);
+    EXPECT_EQ(1234, client.get_visible_data_mask());
+    time_source.simulate_delay_ms(1100);
+    status(otherVT, 5678);
+    client.update();
+    EXPECT_EQ(VirtualTerminalClient::StateMachineState::Disconnected,
+              client.get_state_machine_state());
+
+    const auto nack = [&](std::shared_ptr<ControlFunction> source, std::uint8_t destination) {
+        CANIdentifier id(CANIdentifier::Type::Extended,
+            static_cast<std::uint32_t>(CANLibParameterGroupNumber::Acknowledge),
+            CANIdentifier::CANPriority::PriorityDefault6, 0xFF, source->get_address());
+        CANMessage message(CANMessage::Type::Receive, id,
+            {1, 0xFF, 0xFF, 0xFF, destination, 0, 0xE7, 0}, source, nullptr, 0);
+        client.test_wrapper_process_rx_message(message, &client);
+    };
+    client.test_wrapper_set_state(VirtualTerminalClient::StateMachineState::Connected);
+    nack(otherVT, 0x80);
+    EXPECT_TRUE(client.get_is_connected());
+    nack(vt, 0x87);
+    EXPECT_TRUE(client.get_is_connected());
+    nack(vt, 0x80);
+    EXPECT_EQ(VirtualTerminalClient::StateMachineState::Disconnected,
+              client.get_state_machine_state());
+    CANNetworkManager::CANNetwork.deactivate_control_function(vt);
+}
+
+
 
 TEST_F(VirtualTerminalTest, FullPoolAutoscalingWithVector)
 {
