@@ -721,6 +721,11 @@ namespace isobus
 		bool retVal = true;
 		switch (function)
 		{
+            case static_cast<Function>(0x09):
+                // H.21 acknowledges VT user-layout visibility; it is a response,
+                // so do not send Unsupported Function back to the client.
+                break;
+
 			case Function::GetMemoryMessage:
 			{
 				// The response is handled in process_stateless_messages
