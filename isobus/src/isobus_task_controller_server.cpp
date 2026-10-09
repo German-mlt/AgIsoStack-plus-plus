@@ -255,6 +255,14 @@ namespace isobus
 		while (!rxMessageQueue.empty())
 		{
 			const auto &rxMessage = rxMessageQueue.front();
+			// A live bus may deliver Working Set Master or Process Data before
+			// the sender's Address Claim. Such messages have no resolved source;
+			// never construct an ActiveClient or dereference that null source.
+			if ((nullptr == rxMessage.get_source_control_function()) || rxMessage.get_data().empty())
+			{
+				rxMessageQueue.pop_front();
+				continue;
+			}
 			auto &rxData = rxMessage.get_data();
 
 			switch (rxMessage.get_identifier().get_parameter_group_number())
