@@ -693,6 +693,17 @@ namespace isobus
 			}
 			break;
 
+			case Function::GetSupportedObjectsMessage:
+			{
+				// D.14 is a capability query from any CF, before WS registration.
+				if (get_version() >= VTVersion::Version4)
+				{
+					send_supported_objects(message.get_source_control_function());
+					retVal = true;
+				}
+			}
+			break;
+
 			case Function::GetWindowMaskDataMessage:
 			{
 				send_get_window_mask_data_response(message.get_source_control_function());
@@ -1344,8 +1355,8 @@ namespace isobus
 
 			case Function::GetSupportedObjectsMessage:
 			{
-				send_supported_objects(message.get_source_control_function());
-				LOG_DEBUG("[VT Server]: Sent supported object list to client %u", managedWorkingSet->get_control_function()->get_address());
+				// Handled in process_stateless_messages, also for registered WSs.
+				retVal = (get_version() >= VTVersion::Version4);
 			}
 			break;
 
@@ -3519,7 +3530,7 @@ namespace isobus
 		}
 		return CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 		                                                      buffer.data(),
-		                                                      CAN_DATA_LENGTH,
+		                                                      static_cast<std::uint32_t>(buffer.size()),
 		                                                      serverInternalControlFunction,
 		                                                      destination,
 		                                                      get_priority());
