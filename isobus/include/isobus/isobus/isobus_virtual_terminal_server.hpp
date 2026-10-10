@@ -316,6 +316,8 @@ namespace isobus
 		virtual std::uint8_t get_supported_hardware_features() const { return 0; }
 		/// Whether a derived server handles this function in a registered callback.
 		virtual bool handles_custom_function(Function) const { return false; }
+		/// Functional support can be narrower than mandatory parse compatibility.
+		virtual bool supports_object_functionally(VirtualTerminalObjectType) const { return true; }
 
 		/// @brief If you want to override the amount of time the VT reports it takes to power up, you can override this function.
 		/// @returns The amount of time the VT reports it takes to power up, or 255 if it is not known

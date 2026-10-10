@@ -319,6 +319,13 @@ namespace isobus
 
 	bool WorkingSet::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 1 || attributeID == 2 || attributeID == 3)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
@@ -1742,6 +1749,13 @@ namespace isobus
 
 	bool InputBoolean::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 5 || attributeID == 6)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
@@ -2045,6 +2059,13 @@ namespace isobus
 
 	bool InputString::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 9)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
@@ -2780,6 +2801,13 @@ namespace isobus
 
 	bool InputList::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 4 || attributeID == 5)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
@@ -3522,6 +3550,13 @@ namespace isobus
 				}
 				break;
 
+				case static_cast<std::uint8_t>(AttributeName::Value):
+				{
+					returnedAttributeData = get_value();
+					retVal = true;
+				}
+				break;
+
 				default:
 				{
 					// Do nothing, return false
@@ -3660,6 +3695,13 @@ namespace isobus
 
 	bool OutputList::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 4)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
@@ -4849,6 +4891,13 @@ namespace isobus
 
 	bool OutputMeter::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 12)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
@@ -5251,6 +5300,13 @@ namespace isobus
 
 	bool OutputLinearBarGraph::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 12)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
@@ -5867,6 +5923,13 @@ namespace isobus
 				case static_cast<std::uint8_t>(AttributeName::TargetValue):
 				{
 					returnedAttributeData = get_target_value();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::Value):
+				{
+					returnedAttributeData = get_value();
 					retVal = true;
 				}
 				break;
@@ -8806,6 +8869,13 @@ namespace isobus
 
 	bool AuxiliaryInputType2::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
 	{
+		// Annex B/J bracketed AIDs are accessible only through Get Attribute.
+		if (attributeID == 2)
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+			return false;
+		}
+
 		bool retVal = false;
 
 		switch (attributeID)

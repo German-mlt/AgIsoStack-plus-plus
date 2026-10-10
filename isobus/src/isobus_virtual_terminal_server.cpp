@@ -1702,6 +1702,37 @@ namespace isobus
 			}
 			break;
 
+			case Function::GetAttributeValueMessage:
+			{
+				// F.58/F.59: errors use FFFF in the response Object ID field,
+				// echo the requested ID in bytes 5-6 and carry error bits in byte 7.
+				const auto objectID = get_little_endian_uint16(data, 1);
+				const auto object = managedWorkingSet->get_object_by_id(objectID);
+				std::uint32_t value = 0;
+				std::uint8_t error = 0;
+				if (NULL_OBJECT_ID == objectID || !object) error = 0x01;
+				else if (!supports_object_functionally(object->get_object_type())) error = 0x10;
+				else if (!object->get_attribute(data[3], value)) error = 0x02;
+				std::array<std::uint8_t, CAN_DATA_LENGTH> response{
+				  static_cast<std::uint8_t>(Function::GetAttributeValueMessage),
+				  get_low_byte(objectID), get_high_byte(objectID), data[3],
+				  get_low_byte(value), get_high_byte(value),
+				  static_cast<std::uint8_t>(value >> 16), static_cast<std::uint8_t>(value >> 24)};
+				if (error)
+				{
+					response[1] = response[2] = 0xFF;
+					response[4] = get_low_byte(objectID);
+					response[5] = get_high_byte(objectID);
+					response[6] = error;
+					response[7] = 0xFF;
+				}
+				CANNetworkManager::CANNetwork.send_can_message(
+				  static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+				  response.data(), response.size(), serverInternalControlFunction,
+				  message.get_source_control_function(), get_priority());
+			}
+			break;
+
 			case Function::ChangeAttributeCommand:
 			{
 				auto objectID = get_little_endian_uint16(data, 1);
@@ -1710,7 +1741,11 @@ namespace isobus
 				const auto attributeData = get_little_endian_uint32(data, 4);
 				VTObject::AttributeError errorCode = VTObject::AttributeError::AnyOtherError;
 
-				if ((NULL_OBJECT_ID != objectID) && (nullptr != targetObject))
+				if (targetObject && !supports_object_functionally(targetObject->get_object_type()))
+				{
+					send_change_attribute_response(objectID, get_bit(static_cast<std::uint8_t>(VTObject::AttributeError::AnyOtherError)), attributeID, message.get_source_control_function());
+				}
+				else if ((NULL_OBJECT_ID != objectID) && (nullptr != targetObject))
 				{
 					if (targetObject->set_attribute(attributeID, attributeData, managedWorkingSet->get_object_tree(), errorCode)) // 0 Is always the read-only "type" attribute
 					{

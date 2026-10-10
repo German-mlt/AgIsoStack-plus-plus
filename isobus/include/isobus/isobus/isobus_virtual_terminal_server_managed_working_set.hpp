@@ -52,6 +52,8 @@ namespace isobus
 
 		/// @brief Starts a thread to parse the received object pool files
 		void start_parsing_thread();
+		/// Server admission checks may identify a version-incompatible parsed object.
+		using VirtualTerminalWorkingSetBase::set_object_pool_faulting_object_id;
 
 		/// @brief Joins the parsing thread
 		void join_parsing_thread();

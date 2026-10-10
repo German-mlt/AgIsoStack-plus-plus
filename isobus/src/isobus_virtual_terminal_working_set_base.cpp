@@ -1493,12 +1493,14 @@ namespace isobus
 						tempObject->fontAttributes = get_little_endian_uint16(iopData, 25);
 						tempObject->lineAttributes = get_little_endian_uint16(iopData, 27);
 						tempObject->fillAttributes = get_little_endian_uint16(iopData, 29);
-						tempObject->options = iopData[31];
-						tempObject->transparencyColour = iopData[32];
-						const std::uint8_t macroCount = iopData[33];
+						// B.59 has Format, Options, Transparency in bytes 32-34;
+						// it does not carry a macro-count byte or macro references.
+						tempObject->format = iopData[31];
+						tempObject->options = iopData[32];
+						tempObject->transparencyColour = iopData[33];
 						iopData += tempObject->get_minumum_object_length();
 						iopLength -= tempObject->get_minumum_object_length();
-						retVal = parse_object_macro_reference(tempObject, macroCount, iopData, iopLength);
+						retVal = true;
 					}
 					else
 					{

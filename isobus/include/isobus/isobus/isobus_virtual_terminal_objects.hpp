@@ -1741,7 +1741,8 @@ namespace isobus
 			Format = 10,
 			Justification = 11,
 
-			NumberOfAttributes = 12
+			Value = 12, // Read-only in Annex B.
+			NumberOfAttributes = 13
 		};
 
 		/// @brief Constructor for an output number object
@@ -2663,7 +2664,8 @@ namespace isobus
 			TargetValueVariableReference = 12,
 			TargetValue = 13,
 
-			NumberOfAttributes = 14
+			Value = 14, // Read-only in Annex B.
+			NumberOfAttributes = 15
 		};
 
 		/// @brief Options that can be applied to the input number
@@ -2850,6 +2852,7 @@ namespace isobus
 		std::uint16_t fontAttributes = NULL_OBJECT_ID;
 		std::uint16_t lineAttributes = NULL_OBJECT_ID;
 		std::uint16_t fillAttributes = NULL_OBJECT_ID;
+		std::uint8_t format = 2;
 		std::uint8_t options = 0, transparencyColour = 0;
 
 	private:
