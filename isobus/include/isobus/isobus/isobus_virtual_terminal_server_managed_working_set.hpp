@@ -152,6 +152,10 @@ namespace isobus
 		/// @returns returns true if the IOP size is known but the transfer is not finished
 		bool is_object_pool_transfer_in_progress() const;
 
+		/// Transfer exceeded the VT memory budget; no further chunks may be stored.
+		bool get_pool_transfer_out_of_memory() const { return poolTransferOutOfMemory; }
+		void set_pool_transfer_out_of_memory() { poolTransferOutOfMemory = true; }
+
 	private:
 		/// @brief Sets the object pool processing state to a new value
 		/// @param[in] value The new state of processing the object pool
@@ -175,6 +179,7 @@ namespace isobus
 		bool focusedObjectOpenForInput = false; ///< True while the focused input object is being edited
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
 		std::uint8_t pendingLoadVersionResponseFunction = 0; ///< D1 or D5 response to send after parsing
+		bool poolTransferOutOfMemory = false;
 		bool workingSetDeletionRequested = false; ///< Used to tell the server to delete this working set
 	};
 } // namespace isobus

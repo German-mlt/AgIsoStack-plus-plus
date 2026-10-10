@@ -62,6 +62,9 @@ namespace isobus
 		                                                std::uint8_t receivedFunction);
 
 		/// @brief Builds an E.13, E.15, or E.17 fixed-size response
+		/// Minimum VT version for known ECU-to-VT functions (Annexes D/E/F/J).
+		static bool is_function_available(VTVersion version, Function function);
+
 		static std::array<std::uint8_t, CAN_DATA_LENGTH> make_extended_version_response(std::uint8_t function,
 		                                                                                 std::uint8_t errorCode);
 		static bool should_route_response_to_originator(VTVersion vtVersion,
@@ -119,6 +122,12 @@ namespace isobus
 		/// @param[in] destination The VT client to send the message to
 		/// @returns true if the message was sent, otherwise false
 		bool send_button_activation_message(KeyActivationCode activationCode, std::uint16_t objectId, std::uint16_t parentObjectId, std::uint8_t keyNumber, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Announces cancellation of an input (H.10).
+		bool send_escape_message(std::uint16_t objectId, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Announces visibility of up to two user-layout objects (H.20).
+		bool send_user_layout_message(std::uint16_t firstId, bool firstShown, std::uint16_t secondId, bool secondShown, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends the VT Change Numeric Value message
 		/// @details The VT sends this message any time the operator enters a numeric value for an input object or variable,
@@ -304,6 +313,9 @@ namespace isobus
 		/// Though, that would be unusual.
 		/// @returns The graphic mode of the VT to report to clients
 		virtual VirtualTerminalBase::GraphicMode get_graphic_mode() const;
+		virtual std::uint8_t get_supported_hardware_features() const { return 0; }
+		/// Whether a derived server handles this function in a registered callback.
+		virtual bool handles_custom_function(Function) const { return false; }
 
 		/// @brief If you want to override the amount of time the VT reports it takes to power up, you can override this function.
 		/// @returns The amount of time the VT reports it takes to power up, or 255 if it is not known
@@ -940,6 +952,8 @@ namespace isobus
 		mutable std::vector<std::uint64_t> unexpectedlyDisconnectedWorkingSets;
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
+		std::uint8_t macroExecutionDepth = 0;
+		bool macroExecutionFailed = false;
 		bool initialized = false; ///< True if the server has been initialized, otherwise false
 	};
 } // namespace isobus

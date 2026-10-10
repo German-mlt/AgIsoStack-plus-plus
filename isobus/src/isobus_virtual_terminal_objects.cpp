@@ -449,6 +449,7 @@ namespace isobus
 				switch (childObject->get_object_type())
 				{
 					case VirtualTerminalObjectType::WorkingSet:
+					case VirtualTerminalObjectType::Container:
 					case VirtualTerminalObjectType::Button:
 					case VirtualTerminalObjectType::InputBoolean:
 					case VirtualTerminalObjectType::InputString:
@@ -630,6 +631,7 @@ namespace isobus
 				switch (childObject->get_object_type())
 				{
 					case VirtualTerminalObjectType::WorkingSet:
+					case VirtualTerminalObjectType::Container:
 					case VirtualTerminalObjectType::Button:
 					case VirtualTerminalObjectType::InputBoolean:
 					case VirtualTerminalObjectType::InputString:

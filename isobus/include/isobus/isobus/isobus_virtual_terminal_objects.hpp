@@ -532,7 +532,7 @@ namespace isobus
 		std::uint16_t get_soft_key_mask() const;
 
 	private:
-		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 12; ///< The fewest bytes of IOP data that can represent this object
+		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 8; ///< The fewest bytes of IOP data that can represent this object
 		std::uint16_t softKeyMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the soft key mask associated with this data mask
 	};
 
