@@ -1036,3 +1036,90 @@ TEST_F(VirtualTerminalTest, MessageConstruction)
 	CANNetworkManager::CANNetwork.deactivate_control_function(vtPartner);
 	CANNetworkManager::CANNetwork.deactivate_control_function(internalECU);
 }
+
+TEST_F(VirtualTerminalTest, ManualMoveDeletesOnceAndStopsMaintenanceAfterAcknowledgement)
+{
+    VirtualCANPlugin terminal;
+    terminal.open();
+    CANHardwareInterface::set_number_of_can_channels(1);
+    CANHardwareInterface::assign_can_channel_frame_handler(0, std::make_shared<VirtualCANPlugin>());
+    CANHardwareInterface::start(false);
+    auto ecu = test_helpers::claim_internal_control_function(0x80, 0, time_source);
+    auto vt = test_helpers::force_claim_partnered_control_function(0x26, 0);
+    DerivedTestVTClient client(vt, ecu);
+    client.initialize(false);
+    EXPECT_FALSE(client.request_delete_object_pool());
+    client.test_wrapper_set_state(VirtualTerminalClient::StateMachineState::Connected);
+    time_source.update_for_ms(5);
+    terminal.clear_queue();
+    ASSERT_TRUE(client.request_delete_object_pool());
+    EXPECT_TRUE(client.get_is_initialized());
+    EXPECT_TRUE(client.get_is_connected()); // Request must not terminate prematurely.
+    time_source.update_for_ms(5);
+    CANMessageFrame frame{};
+    ASSERT_TRUE(terminal.read_frame(frame, 0));
+    EXPECT_EQ(0xB2, frame.data[0]);
+    EXPECT_EQ(0x26, (frame.identifier >> 8) & 0xFF);
+    EXPECT_EQ(0x80, frame.identifier & 0xFF);
+    for (unsigned i = 1; i < 8; ++i) EXPECT_EQ(0xFF, frame.data[i]);
+    CANIdentifier id(CANIdentifier::Type::Extended,
+        static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+        CANIdentifier::CANPriority::PriorityDefault6, 0x80, 0x26);
+    CANMessage response(CANMessage::Type::Receive, id,
+        {0xB2, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, vt, ecu, 0);
+    client.test_wrapper_process_rx_message(response, &client);
+    client.terminate(false);
+    EXPECT_FALSE(client.get_is_initialized());
+    time_source.update_for_ms(1500);
+    client.update();
+    while (terminal.read_frame(frame, 0)) {
+        if (((frame.identifier >> 16) & 0xFF) == 0xE7)
+            EXPECT_NE(0xB2, frame.data[0]); // No duplicate deletion after the successful response.
+        if (((frame.identifier >> 16) & 0xFF) == 0xE7)
+            EXPECT_NE(0xFF, frame.data[0]); // No more Working Set Maintenance.
+    }
+    CANNetworkManager::CANNetwork.deactivate_control_function(vt);
+    CANNetworkManager::CANNetwork.deactivate_control_function(ecu);
+    CANHardwareInterface::stop();
+}
+
+TEST_F(VirtualTerminalTest, RebindSameVTAfterRestart)
+{
+    CANHardwareInterface::set_number_of_can_channels(1);
+    CANHardwareInterface::assign_can_channel_frame_handler(0, std::make_shared<VirtualCANPlugin>());
+    CANHardwareInterface::start(false);
+    auto ecu = test_helpers::claim_internal_control_function(0x81, 0, time_source);
+    auto vt = test_helpers::force_claim_partnered_control_function(0x28, 0);
+    std::vector<NAMEFilter> filters;
+    for (unsigned i = 0; i < vt->get_number_name_filters(); ++i) {
+        NAME::NAMEParameters type;
+        std::uint32_t value;
+        ASSERT_TRUE(vt->get_name_filter_parameter(i, type, value));
+        filters.emplace_back(type, value);
+    }
+    auto client = std::make_shared<DerivedTestVTClient>(vt, ecu);
+    client->initialize(false);
+    client->test_wrapper_set_state(VirtualTerminalClient::StateMachineState::Connected);
+    client->terminate(false);
+    client.reset();
+    CANNetworkManager::CANNetwork.deactivate_control_function(vt);
+    vt = CANNetworkManager::CANNetwork.create_partnered_control_function(0, filters);
+    ASSERT_TRUE(vt->get_address_valid());
+    client = std::make_shared<DerivedTestVTClient>(vt, ecu);
+    client->initialize(false);
+    client->update();
+    EXPECT_EQ(VirtualTerminalClient::StateMachineState::WaitForPartnerVTStatusMessage,
+              client->get_state_machine_state());
+    CANMessageFrame status{};
+    status.channel = 0; status.identifier = 0x1CE6FF28;
+    status.dataLength = 8; status.isExtendedFrame = true; status.data[0] = 0xFE;
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(status);
+    time_source.update_for_ms(10);
+    client->update();
+    EXPECT_EQ(VirtualTerminalClient::StateMachineState::SendWorkingSetMasterMessage,
+              client->get_state_machine_state());
+    client->terminate(false);
+    CANNetworkManager::CANNetwork.deactivate_control_function(vt);
+    CANNetworkManager::CANNetwork.deactivate_control_function(ecu);
+    CANHardwareInterface::stop();
+}

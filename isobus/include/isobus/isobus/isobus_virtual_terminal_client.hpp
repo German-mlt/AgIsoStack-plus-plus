@@ -402,7 +402,13 @@ namespace isobus
 		StateMachineState get_state_machine_state() const;
 
 		/// @brief Terminates the client and joins the worker thread if applicable
-		void terminate();
+		/// @param[in] deleteObjectPool False when deletion was already acknowledged,
+		/// or when the selected VT is no longer available. This does not cancel TP/ETP.
+		void terminate(bool deleteObjectPool = true);
+
+		/// @brief Request deletion without stopping maintenance. Before a manual
+		/// move, wait for the selected VT's B2 response, then call terminate(false).
+		bool request_delete_object_pool() const { return get_is_connected() && send_delete_object_pool(); }
 
 		/// @brief Halts communication with the VT gracefully and restarts it.
 		void restart_communication();

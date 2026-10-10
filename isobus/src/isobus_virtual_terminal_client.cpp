@@ -86,13 +86,13 @@ namespace isobus
 		return state;
 	}
 
-	void VirtualTerminalClient::terminate()
+	void VirtualTerminalClient::terminate(bool deleteObjectPool)
 	{
 		if (initialized)
 		{
 			if (nullptr != partnerControlFunction)
 			{
-				if ((StateMachineState::Connected == state) &&
+				if (deleteObjectPool && (StateMachineState::Connected == state) &&
 				    (send_delete_object_pool()))
 				{
 					LOG_DEBUG("[VT]: Requested object pool deletion from volatile VT memory.");
