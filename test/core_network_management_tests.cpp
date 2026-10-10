@@ -424,3 +424,86 @@ TEST_F(CoreTest, SimilarControlFunctions)
 	EXPECT_EQ(TestPartner->get_NAME().get_full_name(), 0xa0000F000425e9f8);
 	CANNetworkManager::CANNetwork.deactivate_control_function(TestPartner);
 }
+
+// VT migration promotes a discovered external CF after address-claim replies
+// may already have been processed, but before the request resolution timeout.
+TEST_F(CoreTest, PromotedPartnerPreservesRecentAddressClaimResponse)
+{
+    CANHardwareInterface::set_number_of_can_channels(1);
+    CANHardwareInterface::assign_can_channel_frame_handler(0, std::make_shared<VirtualCANPlugin>());
+    CANHardwareInterface::start(false);
+    auto ecu = test_helpers::claim_internal_control_function(0x80, 0, time_source);
+    const NAME remoteName(0xA00080080C404FB9ULL);
+    CANMessageFrame claim{};
+    claim.channel = 0; claim.isExtendedFrame = true;
+    claim.identifier = 0x18EEFF2E; claim.dataLength = 8;
+    for (unsigned i = 0; i < 8; ++i)
+        claim.data[i] = static_cast<std::uint8_t>(remoteName.get_full_name() >> (8 * i));
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(claim);
+    time_source.update_for_ms(5);
+    CANMessageFrame request{};
+    request.channel = 0; request.isExtendedFrame = true;
+    request.identifier = 0x18EAFFFE; request.dataLength = 3;
+    request.data[0] = 0; request.data[1] = 0xEE; request.data[2] = 0;
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(request);
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(claim);
+    time_source.update_for_ms(5);
+    const std::vector<NAMEFilter> filters{
+        {NAME::NAMEParameters::IdentityNumber, remoteName.get_identity_number()},
+        {NAME::NAMEParameters::ManufacturerCode, remoteName.get_manufacturer_code()},
+        {NAME::NAMEParameters::FunctionInstance, remoteName.get_function_instance()}};
+    auto partner = CANNetworkManager::CANNetwork.create_partnered_control_function(0, filters);
+    ASSERT_TRUE(partner->get_address_valid());
+    time_source.update_for_ms(800);
+    EXPECT_TRUE(partner->get_address_valid());
+    EXPECT_EQ(0x2E, partner->get_address());
+    // Leaving a VT demotes its wrapper to External. Rebinding it must also
+    // preserve an already received reply within the same resolution window.
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(request);
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(claim);
+    time_source.update_for_ms(5);
+    CANNetworkManager::CANNetwork.deactivate_control_function(partner);
+    partner = CANNetworkManager::CANNetwork.create_partnered_control_function(0, filters);
+    time_source.update_for_ms(800);
+    EXPECT_TRUE(partner->get_address_valid());
+    EXPECT_EQ(0x2E, partner->get_address());
+    CANNetworkManager::CANNetwork.deactivate_control_function(partner);
+    CANNetworkManager::CANNetwork.deactivate_control_function(ecu);
+    CANHardwareInterface::stop();
+}
+
+TEST_F(CoreTest, RecoveredPartnerAddressClaimIsNotPrunedAgain)
+{
+    CANHardwareInterface::set_number_of_can_channels(1);
+    CANHardwareInterface::assign_can_channel_frame_handler(0, std::make_shared<VirtualCANPlugin>());
+    CANHardwareInterface::start(false);
+    auto ecu = test_helpers::claim_internal_control_function(0x80, 0, time_source);
+    auto other = test_helpers::force_claim_partnered_control_function(0x26, 0);
+    auto partner = test_helpers::force_claim_partnered_control_function(0x2E, 0);
+    CANMessageFrame request{};
+    request.channel = 0; request.isExtendedFrame = true;
+    request.identifier = 0x18EAFFFE; request.dataLength = 3;
+    request.data[1] = 0xEE;
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(request);
+    time_source.update_for_ms(800);
+    ASSERT_FALSE(other->get_address_valid());
+    ASSERT_FALSE(partner->get_address_valid());
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(request);
+    time_source.update_for_ms(5);
+    CANMessageFrame claim{};
+    claim.channel = 0; claim.isExtendedFrame = true;
+    claim.identifier = 0x18EEFF2E; claim.dataLength = 8;
+    for (unsigned i = 0; i < 8; ++i)
+        claim.data[i] = static_cast<std::uint8_t>(partner->get_NAME().get_full_name() >> (8 * i));
+    CANNetworkManager::CANNetwork.process_receive_can_message_frame(claim);
+    time_source.update_for_ms(5);
+    ASSERT_TRUE(partner->get_address_valid());
+    time_source.update_for_ms(800);
+    EXPECT_TRUE(partner->get_address_valid());
+    EXPECT_EQ(0x2E, partner->get_address());
+    EXPECT_FALSE(other->get_address_valid()); // No reply: must remain offline.
+    CANNetworkManager::CANNetwork.deactivate_control_function(partner);
+    CANNetworkManager::CANNetwork.deactivate_control_function(other);
+    CANNetworkManager::CANNetwork.deactivate_control_function(ecu);
+    CANHardwareInterface::stop();
+}

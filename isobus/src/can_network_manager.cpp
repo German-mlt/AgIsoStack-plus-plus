@@ -360,7 +360,9 @@ namespace isobus
 				if (controlFunction->get_address_valid() && ControlFunction::Type::Partnered == controlFunction->get_type())
 				{
 					// The control function was an active partner when deleted, so we replace it with an new external control function instead
-					create_external_control_function(controlFunction->get_NAME(), controlFunction->get_address(), controlFunction->get_can_port());
+					auto external = create_external_control_function(controlFunction->get_NAME(), controlFunction->get_address(), controlFunction->get_can_port());
+					external->claimedAddressSinceLastAddressClaimRequest =
+					  controlFunction->claimedAddressSinceLastAddressClaimRequest;
 				}
 			}
 		}
@@ -600,6 +602,9 @@ namespace isobus
 				if (result != inactiveControlFunctions.end())
 				{
 					targetControlFunction = *result;
+					// This very message is a fresh claim, including when the CF
+					// had been removed by a previous request timeout.
+					targetControlFunction->claimedAddressSinceLastAddressClaimRequest = true;
 
 					LOG_DEBUG("[NM]: %s CF '%016llx' is now active at address '%d' on channel '%d'.",
 					          targetControlFunction->get_type_string().c_str(),
@@ -902,6 +907,10 @@ namespace isobus
 						// Populate the partner's data
 						partner->address = currentActiveControlFunction->get_address();
 						partner->controlFunctionNAME = currentActiveControlFunction->get_NAME();
+						// Promotion changes the local wrapper, not the remote ECU's
+						// response to an address-claim request already in progress.
+						partner->claimedAddressSinceLastAddressClaimRequest =
+						  currentActiveControlFunction->claimedAddressSinceLastAddressClaimRequest;
 						partner->initialized = true;
 						controlFunctionTable[partner->get_can_port()][partner->address] = std::shared_ptr<ControlFunction>(partner);
 						process_control_function_state_change_callback(partner, ControlFunctionState::Online);
