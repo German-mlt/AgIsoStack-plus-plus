@@ -374,15 +374,19 @@ namespace isobus
 			    ((data[2] == 0xFF) || (data[1] & 0x01))) // G.3: VT2 uses reserved FF flags, not an initiating bit
 			{
 				// This CF is probably trying to initiate communication with us.
-				managedWorkingSetList.emplace_back(std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function()));
+				auto workingSet = std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function());
+				// Publish a fully initialized session. The application's timeout
+				// polling must never observe the default timestamp (zero) and retire
+				// a freshly received initiating maintenance message as expired.
+				workingSet->set_working_set_maintenance_message_timestamp_ms(SystemTiming::get_timestamp_ms());
+				workingSet->set_version(data[2]);
 
-				LOG_INFO("[VT Server]: Client %u initiated working set maintenance messages with version %u", managedWorkingSetList.back()->get_control_function()->get_address(), data[2]);
+				LOG_INFO("[VT Server]: Client %u initiated working set maintenance messages with version %u", workingSet->get_control_function()->get_address(), data[2]);
 				if (data[2] > get_vt_version_byte(get_version()))
 				{
-					LOG_WARNING("[VT Server]: Client %u version %u is higher than our reported version, which is %u", managedWorkingSetList.back()->get_control_function()->get_address(), data[2], get_vt_version_byte(get_version()));
+					LOG_WARNING("[VT Server]: Client %u version %u is higher than our reported version, which is %u", workingSet->get_control_function()->get_address(), data[2], get_vt_version_byte(get_version()));
 				}
-				managedWorkingSetList.back()->set_working_set_maintenance_message_timestamp_ms(SystemTiming::get_timestamp_ms());
-				managedWorkingSetList.back()->set_version(data[2]);
+				managedWorkingSetList.push_back(std::move(workingSet));
 				retVal = true;
 			}
 		}
