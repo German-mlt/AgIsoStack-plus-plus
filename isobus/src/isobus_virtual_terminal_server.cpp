@@ -1500,12 +1500,50 @@ namespace isobus
 				{
 					if (nullptr != stringObject)
 					{
+						// F.24 changes content, never the fixed length of its target.
+						std::size_t capacity = 0;
+						bool stringTarget = true;
+						switch (stringObject->get_object_type())
+						{
+							case VirtualTerminalObjectType::StringVariable:
+								capacity = std::static_pointer_cast<StringVariable>(stringObject)->get_value().size();
+								break;
+							case VirtualTerminalObjectType::OutputString:
+								capacity = std::static_pointer_cast<OutputString>(stringObject)->get_value().size();
+								break;
+							case VirtualTerminalObjectType::InputString:
+								capacity = std::static_pointer_cast<InputString>(stringObject)->get_value().size();
+								break;
+							default:
+								stringTarget = false;
+								break;
+						}
+						if (stringTarget && numberOfBytesInString > capacity)
+						{
+							send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::StringTooLong)), message.get_source_control_function());
+							break;
+						}
 						std::string newStringValue;
 
 						for (std::uint32_t i = 0; i < numberOfBytesInString; i++)
 						{
 							newStringValue.push_back(static_cast<char>(data.at(5 + i)));
 						}
+						const bool wide = newStringValue.size() >= 2 &&
+						                  static_cast<std::uint8_t>(newStringValue[0]) == 0xFF &&
+						                  static_cast<std::uint8_t>(newStringValue[1]) == 0xFE;
+						if (stringTarget && wide && (newStringValue.size() % 2 != 0 || capacity % 2 != 0))
+						{
+							send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::AnyOtherError)), message.get_source_control_function());
+							break;
+						}
+						const auto padString = [wide](std::string &value, std::size_t length) {
+							while (value.size() < length)
+							{
+								value.push_back(' ');
+								if (wide) value.push_back('\0');
+							}
+						};
 
 						switch (stringObject->get_object_type())
 						{
@@ -1515,10 +1553,7 @@ namespace isobus
 
 								// The transferred string is allowed to be smaller than the length of the value attribute of the target object
 								// and in this case the VT shall pad the value attribute with space characters.
-								while (newStringValue.length() < stringVariable->get_value().length())
-								{
-									newStringValue.push_back(' ');
-								}
+								padString(newStringValue, capacity);
 								stringVariable->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								onRepaintEventDispatcher.call(managedWorkingSet);
@@ -1532,10 +1567,7 @@ namespace isobus
 
 								// The transferred string is allowed to be smaller than the length of the value attribute of the target object
 								// and in this case the VT shall pad the value attribute with space characters.
-								while (newStringValue.length() < outputString->get_value().length())
-								{
-									newStringValue.push_back(' ');
-								}
+								padString(newStringValue, capacity);
 								outputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								onRepaintEventDispatcher.call(managedWorkingSet);
@@ -1549,10 +1581,7 @@ namespace isobus
 
 								// The transferred string is allowed to be smaller than the length of the value attribute of the target object
 								// and in this case the VT shall pad the value attribute with space characters.
-								while (newStringValue.length() < inputString->get_value().length())
-								{
-									newStringValue.push_back(' ');
-								}
+								padString(newStringValue, capacity);
 								inputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								onRepaintEventDispatcher.call(managedWorkingSet);
