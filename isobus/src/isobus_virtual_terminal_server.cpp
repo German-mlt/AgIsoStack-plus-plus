@@ -946,10 +946,19 @@ namespace isobus
 				{
 					send_extended_version_response(data[0], 0x02, message.get_source_control_function());
 				}
+				else if (loadedVersion.size() > UINT32_MAX ||
+				         !get_is_enough_memory(static_cast<std::uint32_t>(loadedVersion.size())))
+				{
+					send_extended_version_response(data[0], 0x04, message.get_source_control_function());
+				}
+				else if (managedWorkingSet->get_object_pool_processing_state() == VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running)
+				{
+					send_extended_version_response(data[0], 0x08, message.get_source_control_function());
+				}
 				else
 				{
-					managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
-					managedWorkingSet->add_iop_raw_data(loadedVersion);
+					suspend_working_set(managedWorkingSet);
+					managedWorkingSet->replace_object_pool_data(loadedVersion);
 					managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
 					managedWorkingSet->set_pending_load_version_response_function(data[0], {});
 					managedWorkingSet->start_parsing_thread();
@@ -1030,16 +1039,25 @@ namespace isobus
 				}
 
 				auto loadedVersion = load_version(versionLabel, message.get_source_control_function()->get_NAME());
-				if (!loadedVersion.empty())
+				if (loadedVersion.empty())
 				{
-					managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
-					managedWorkingSet->add_iop_raw_data(loadedVersion);
-				}
-				else
-				{
-					send_load_version_response(0x01, message.get_source_control_function());
+					send_load_version_response(0x02, message.get_source_control_function());
 					LOG_ERROR("[VT Server]: Failed to load requested object pool version");
+					break;
 				}
+				if (loadedVersion.size() > UINT32_MAX ||
+				    !get_is_enough_memory(static_cast<std::uint32_t>(loadedVersion.size())))
+				{
+					send_load_version_response(0x04, message.get_source_control_function());
+					break;
+				}
+				if (managedWorkingSet->get_object_pool_processing_state() == VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running)
+				{
+					send_load_version_response(0x08, message.get_source_control_function());
+					break;
+				}
+				suspend_working_set(managedWorkingSet);
+				managedWorkingSet->replace_object_pool_data(loadedVersion);
 
 				if (managedWorkingSet->get_any_object_pools())
 				{

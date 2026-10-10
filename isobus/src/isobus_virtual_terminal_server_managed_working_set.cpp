@@ -46,6 +46,26 @@ namespace isobus
 		}
 	}
 
+	void VirtualTerminalServerManagedWorkingSet::replace_object_pool_data(const std::vector<std::uint8_t> &data)
+	{
+		join_parsing_thread();
+		// Hide the previous tree from runtime readers before replacing it.
+		set_object_pool_processing_state(ObjectPoolProcessingThreadState::Running);
+		vtObjectTree.clear();
+		iopFilesRawData.clear();
+		transferredIopSize = 0;
+		iopSize = static_cast<std::uint32_t>(data.size());
+		workingSetID = NULL_OBJECT_ID;
+		faultingObjectID = NULL_OBJECT_ID;
+		selectedColourMap = NULL_OBJECT_ID;
+		selectedColourPalette = NULL_OBJECT_ID;
+		workingSetColourTable = VTColourTable();
+		focusedObject = NULL_OBJECT_ID;
+		focusedObjectOpenForInput = false;
+		poolTransferOutOfMemory = false;
+		add_iop_raw_data(data);
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::join_parsing_thread()
 	{
 		if ((nullptr != objectPoolProcessingThread) && (objectPoolProcessingThread->joinable()))

@@ -52,6 +52,9 @@ namespace isobus
 
 		/// @brief Starts a thread to parse the received object pool files
 		void start_parsing_thread();
+		/// Replace the current pool for a Load Version operation. The caller must
+		/// suspend runtime callbacks and reject the request while parsing is running.
+		void replace_object_pool_data(const std::vector<std::uint8_t> &data);
 		/// Server admission checks may identify a version-incompatible parsed object.
 		using VirtualTerminalWorkingSetBase::set_object_pool_faulting_object_id;
 
