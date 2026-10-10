@@ -655,7 +655,10 @@ namespace isobus
 		case Function::GetMemoryMessage:
 			{
 				const auto requiredMemory = get_little_endian_uint32(data, 2);
-				bool isEnoughMemory = get_is_enough_memory(requiredMemory);
+				const auto existing = std::find_if(managedWorkingSetList.begin(), managedWorkingSetList.end(),
+				  [&](const auto &pool) { return pool && pool->is_master(message.get_source_control_function()); });
+				const auto owner = existing == managedWorkingSetList.end() ? nullptr : *existing;
+				bool isEnoughMemory = get_is_enough_memory_for_pool(owner, requiredMemory);
 				LOG_INFO("[VT Server]: An ecu requested %u bytes of memory.", requiredMemory);
 
 				if (!isEnoughMemory)
@@ -868,7 +871,7 @@ namespace isobus
 				std::uint64_t total = data.size() - 1;
 				for (std::size_t index = 0; index < managedWorkingSet->get_number_iop_files(); ++index)
 					total += managedWorkingSet->get_iop_raw_data(index).size();
-				if (total > UINT32_MAX || !get_is_enough_memory(static_cast<std::uint32_t>(total)))
+				if (total > UINT32_MAX || !get_is_enough_memory_for_pool(managedWorkingSet, static_cast<std::uint32_t>(total)))
 				{
 					managedWorkingSet->set_pool_transfer_out_of_memory();
 					LOG_WARNING("[VT Server]: Object pool transfer exceeded the memory budget");
@@ -947,7 +950,7 @@ namespace isobus
 					send_extended_version_response(data[0], 0x02, message.get_source_control_function());
 				}
 				else if (loadedVersion.size() > UINT32_MAX ||
-				         !get_is_enough_memory(static_cast<std::uint32_t>(loadedVersion.size())))
+				         !get_is_enough_memory_for_pool(managedWorkingSet, static_cast<std::uint32_t>(loadedVersion.size())))
 				{
 					send_extended_version_response(data[0], 0x04, message.get_source_control_function());
 				}
@@ -1046,7 +1049,7 @@ namespace isobus
 					break;
 				}
 				if (loadedVersion.size() > UINT32_MAX ||
-				    !get_is_enough_memory(static_cast<std::uint32_t>(loadedVersion.size())))
+				    !get_is_enough_memory_for_pool(managedWorkingSet, static_cast<std::uint32_t>(loadedVersion.size())))
 				{
 					send_load_version_response(0x04, message.get_source_control_function());
 					break;

@@ -136,7 +136,6 @@ namespace isobus
 	{
 		if (activeSessions.size() >= configuration->get_max_number_transport_protocol_sessions())
 		{
-			// TODO: consider using maximum memory instead of maximum number of sessions
 			LOG_WARNING("[ETP]: Replying with abort to Request To Send (RTS) for 0x%05X, configured maximum number of sessions reached.",
 			            parameterGroupNumber);
 			send_abort(std::static_pointer_cast<InternalControlFunction>(destination), source, parameterGroupNumber, ConnectionAbortReason::AlreadyInCMSession);
@@ -158,6 +157,24 @@ namespace isobus
 					            parameterGroupNumber);
 					close_session(oldSession, false);
 				}
+				oldSession.reset();
+			}
+
+			std::uint64_t receiveBytes = 0;
+			for (const auto &session : activeSessions)
+			{
+				if (session->get_direction() == ExtendedTransportProtocolSession::Direction::Receive)
+				{
+					receiveBytes += session->get_message_length();
+				}
+			}
+			const auto receiveLimit = configuration->get_max_extended_transport_protocol_receive_memory();
+			if ((totalMessageSize > configuration->get_max_extended_transport_protocol_message_size()) ||
+			    (receiveBytes > receiveLimit) || (totalMessageSize > receiveLimit - receiveBytes))
+			{
+				LOG_WARNING("[ETP]: Rejecting RTS for 0x%05X, configured receive memory limit reached.", parameterGroupNumber);
+				send_abort(std::static_pointer_cast<InternalControlFunction>(destination), source, parameterGroupNumber, ConnectionAbortReason::SystemResourcesNeeded);
+				return;
 			}
 
 			auto newSession = std::make_shared<ExtendedTransportProtocolSession>(ExtendedTransportProtocolSession::Direction::Receive,

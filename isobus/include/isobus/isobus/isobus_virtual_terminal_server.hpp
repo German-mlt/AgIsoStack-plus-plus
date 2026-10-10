@@ -193,6 +193,13 @@ namespace isobus
 		/// @param[in] requestedMemory The amount of memory requested by the client
 		/// @returns True if the server has enough memory to store the object pool, otherwise false
 		virtual bool get_is_enough_memory(std::uint32_t requestedMemory) const = 0;
+		/// Admission of a complete/cumulative pool, excluding that pool's existing
+		/// storage when checking a shared budget. Null means an unregistered CF.
+		/// Default preserves the existing memory callback for other servers.
+		virtual bool get_is_enough_memory_for_pool(std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint32_t totalPoolBytes) const
+		{
+			return get_is_enough_memory(totalPoolBytes);
+		}
 
 		/// @brief This function is called when the client wants to know the version of the VT.
 		/// @returns The version of the VT

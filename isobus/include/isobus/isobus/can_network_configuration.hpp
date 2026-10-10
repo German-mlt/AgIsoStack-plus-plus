@@ -37,6 +37,12 @@ namespace isobus
 		/// @returns The max number of concurrent TP sessions
 		std::uint32_t get_max_number_transport_protocol_sessions() const;
 
+		/// Bounds for ETP receive allocations; configure before starting hardware.
+		void set_max_extended_transport_protocol_message_size(std::uint32_t bytes);
+		std::uint32_t get_max_extended_transport_protocol_message_size() const;
+		void set_max_extended_transport_protocol_receive_memory(std::uint64_t bytes);
+		std::uint64_t get_max_extended_transport_protocol_receive_memory() const;
+
 		/// @brief Sets the minimum time to wait between sending BAM frames
 		/// (default is 50 ms for maximum J1939 compatibility)
 		/// @details The acceptable range as defined by ISO-11783 is 10 to 200 ms.
@@ -88,6 +94,8 @@ namespace isobus
 		static constexpr std::uint8_t DEFAULT_BAM_PACKET_DELAY_TIME_MS = 50; ///< The default time between BAM frames, as defined by J1939
 
 		std::uint32_t maxNumberTransportProtocolSessions = 4; ///< The max number of TP sessions allowed
+		std::uint32_t maxExtendedTransportProtocolMessageSize = UINT32_MAX;
+		std::uint64_t maxExtendedTransportProtocolReceiveMemory = UINT64_MAX;
 		std::uint32_t minimumTimeBetweenTransportProtocolBAMFrames = DEFAULT_BAM_PACKET_DELAY_TIME_MS; ///< The configurable time between BAM frames
 		std::uint8_t networkManagerMaxFramesToSendPerUpdate = 0xFF; ///< Used to control the max number of transport layer frames added to the driver queue per network manager update
 		std::uint8_t numberOfPacketsPerDPOMessage = 16; ///< The number of packets per DPO message for ETP sessions

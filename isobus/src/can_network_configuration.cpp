@@ -21,6 +21,26 @@ namespace isobus
 		return maxNumberTransportProtocolSessions;
 	}
 
+	void CANNetworkConfiguration::set_max_extended_transport_protocol_message_size(std::uint32_t bytes)
+	{
+		maxExtendedTransportProtocolMessageSize = bytes;
+	}
+
+	std::uint32_t CANNetworkConfiguration::get_max_extended_transport_protocol_message_size() const
+	{
+		return maxExtendedTransportProtocolMessageSize;
+	}
+
+	void CANNetworkConfiguration::set_max_extended_transport_protocol_receive_memory(std::uint64_t bytes)
+	{
+		maxExtendedTransportProtocolReceiveMemory = bytes;
+	}
+
+	std::uint64_t CANNetworkConfiguration::get_max_extended_transport_protocol_receive_memory() const
+	{
+		return maxExtendedTransportProtocolReceiveMemory;
+	}
+
 	void CANNetworkConfiguration::set_minimum_time_between_transport_protocol_bam_frames(std::uint32_t value)
 	{
 		constexpr std::uint32_t MAX_BAM_FRAME_DELAY_MS = 200;
