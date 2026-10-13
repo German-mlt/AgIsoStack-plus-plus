@@ -81,6 +81,12 @@ namespace isobus
 		return faultingObjectID;
 	}
 
+	std::uint8_t VirtualTerminalWorkingSetBase::get_object_pool_faulting_object_type()
+	{
+		std::lock_guard<std::mutex> lock(managedWorkingSetMutex);
+		return faultingObjectType;
+	}
+
 	void VirtualTerminalWorkingSetBase::add_iop_raw_data(const std::vector<std::uint8_t> &dataToAdd)
 	{
 		transferredIopSize += dataToAdd.size();
@@ -2746,13 +2752,26 @@ namespace isobus
 		std::uint32_t remainingLength = iopLength;
 		std::uint8_t *currentIopPointer = iopData;
 		bool retVal = true;
+		{
+			const std::lock_guard<std::mutex> lock(managedWorkingSetMutex);
+			faultingObjectID = NULL_OBJECT_ID;
+			faultingObjectType = 0xFF;
+		}
 
 		if (iopLength > 0)
 		{
 			while (remainingLength > 0)
 			{
+				// Capture the header before parse_next_object can partially advance it.
+				const auto objectID = remainingLength >= 2 ? get_little_endian_uint16(currentIopPointer, 0) : NULL_OBJECT_ID;
+				const auto objectType = remainingLength >= 3 ? currentIopPointer[2] : 0xFF;
 				if (!parse_next_object(currentIopPointer, remainingLength))
 				{
+					{
+						const std::lock_guard<std::mutex> lock(managedWorkingSetMutex);
+						faultingObjectID = objectID;
+						faultingObjectType = objectType;
+					}
 					LOG_ERROR("[WS]: Parsing object pool failed.");
 					retVal = false;
 					break;

@@ -66,6 +66,8 @@ namespace isobus
 		/// @brief Returns the object ID of the the faulting object if parsing the object pool failed
 		/// @returns The object ID of the faulting object if parsing the object pool failed
 		std::uint16_t get_object_pool_faulting_object_id();
+		/// @brief Object type byte at a parse failure, or 0xFF if the header was incomplete.
+		std::uint8_t get_object_pool_faulting_object_type();
 
 	protected:
 		/// @brief Adds an object to the object tree, and replaces an object
@@ -117,6 +119,7 @@ namespace isobus
 		std::vector<std::vector<std::uint8_t>> iopFilesRawData; ///< Raw IOP File data from the client
 		std::uint16_t workingSetID = NULL_OBJECT_ID; ///< Stores the object ID of the working set object itself
 		std::uint16_t faultingObjectID = NULL_OBJECT_ID; ///< Stores the faulting object ID to send to a client when parsing the pool fails
+		std::uint8_t faultingObjectType = 0xFF; ///< Type from the failing raw object header
 		std::uint16_t selectedColourMap = NULL_OBJECT_ID; ///< Active per-Working-Set colour remapping
 		std::uint16_t selectedColourPalette = NULL_OBJECT_ID; ///< Active VT6 Working Set palette
 	};
