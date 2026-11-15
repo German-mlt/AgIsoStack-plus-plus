@@ -379,9 +379,21 @@ namespace isobus
 		return deserialize_binary_object_pool(binaryPool.data(), static_cast<std::uint32_t>(binaryPool.size()), clientNAME);
 	}
 
+	std::uint16_t DeviceDescriptorObjectPool::get_deserialization_failure_object_id() const
+	{
+		return deserializationFailureObjectID;
+	}
+
+	std::uint16_t DeviceDescriptorObjectPool::get_deserialized_device_object_count() const
+	{
+		return deserializedDeviceObjects;
+	}
+
 	bool DeviceDescriptorObjectPool::deserialize_binary_object_pool(const std::uint8_t *binaryPool, std::uint32_t binaryPoolSizeBytes, NAME clientNAME)
 	{
 		bool retVal = true;
+		deserializationFailureObjectID = NULL_OBJECT_ID;
+		deserializedDeviceObjects = 0;
 
 		if ((nullptr != binaryPool) && (0 != binaryPoolSizeBytes))
 		{
@@ -518,6 +530,7 @@ namespace isobus
 							}
 
 							remove_objects_with_type(task_controller_object::ObjectTypes::Device); // Make sure the previous device object is removed
+							deserializedDeviceObjects++;
 							if (add_device(deviceDesignator, deviceSoftwareVersion, deviceSerialNumber, deviceStructureLabel, localizationLabel, extendedStructureLabel, clientNAME.get_full_name()))
 							{
 								binaryPoolSizeBytes -= expectedSize;
@@ -786,6 +799,11 @@ namespace isobus
 
 				if (!retVal)
 				{
+					// binaryPool still points at the start of the object that failed.
+					if (binaryPoolSizeBytes >= 5)
+					{
+						deserializationFailureObjectID = static_cast<std::uint16_t>(binaryPool[3] | (static_cast<std::uint16_t>(binaryPool[4]) << 8));
+					}
 					LOG_ERROR("[DDOP]: Binary DDOP deserialization aborted.");
 					break;
 				}

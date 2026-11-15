@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <array>
+
 #include "isobus/isobus/can_constants.hpp"
 #include "isobus/isobus/isobus_device_descriptor_object_pool.hpp"
 #include "isobus/isobus/isobus_language_command_interface.hpp"
@@ -729,4 +731,43 @@ TEST(DDOP_TESTS, ISOXMLOutput)
 </ISO11783_TaskData>
 )ISOXML";
 	EXPECT_EQ(textXML, isoxml);
+}
+
+TEST(DDOP_TESTS, DeserializationReportsFailureObjectAndDeviceCount)
+{
+	DeviceDescriptorObjectPool source(4);
+	const std::array<std::uint8_t, 7> localization{ 'e', 's', 0, 0, 0, 0, 0xFF };
+	ASSERT_TRUE(source.add_device("Implement", "1.0", "1", "LABEL01", localization, std::vector<std::uint8_t>(), 0x1234));
+	ASSERT_TRUE(source.add_device_element("Root", 0, 0, task_controller_object::DeviceElementObject::Type::Device, 10));
+	ASSERT_TRUE(source.add_device_process_data("Rate", 6, NULL_OBJECT_ID, 3, 9, 30));
+	std::static_pointer_cast<task_controller_object::DeviceElementObject>(source.get_object_by_id(10))->add_reference_to_child_object(30);
+	std::vector<std::uint8_t> binary;
+	ASSERT_TRUE(source.generate_binary_object_pool(binary));
+
+	// A complete pool: one DVC, no failure.
+	DeviceDescriptorObjectPool parsed(4);
+	ASSERT_TRUE(parsed.deserialize_binary_object_pool(binary));
+	EXPECT_EQ(1, parsed.get_deserialized_device_object_count());
+	EXPECT_EQ(NULL_OBJECT_ID, parsed.get_deserialization_failure_object_id());
+
+	// The last object (process data 30) truncated: the failure names it.
+	std::vector<std::uint8_t> truncated(binary.begin(), binary.end() - 3);
+	DeviceDescriptorObjectPool broken(4);
+	EXPECT_FALSE(broken.deserialize_binary_object_pool(truncated));
+	EXPECT_EQ(30, broken.get_deserialization_failure_object_id());
+
+	// A second DVC replaces the first (upstream behaviour), and is counted.
+	std::size_t at = 5;
+	at += 1 + binary[at]; // designator
+	at += 1 + binary[at]; // software version
+	at += 8; // NAME
+	at += 1 + binary[at]; // serial number
+	at += 14; // structure and localization labels
+	at += 1 + binary[at]; // extended structure label (version 4)
+	std::vector<std::uint8_t> twice = binary;
+	twice.insert(twice.end(), binary.begin(), binary.begin() + static_cast<std::ptrdiff_t>(at));
+	twice[binary.size() + 3] = 0x77; // another object ID
+	DeviceDescriptorObjectPool doubled(4);
+	EXPECT_TRUE(doubled.deserialize_binary_object_pool(twice));
+	EXPECT_EQ(2, doubled.get_deserialized_device_object_count());
 }

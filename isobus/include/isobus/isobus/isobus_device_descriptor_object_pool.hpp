@@ -162,6 +162,17 @@ namespace isobus
 		/// @brief Gets an object from the DDOP that corresponds to a certain object ID
 		/// @param[in] objectID The ID of the object to get
 		/// @returns Pointer to the object matching the provided ID, or nullptr if no match was found
+		/// @brief Returns the object ID where the last deserialize_binary_object_pool() stopped, so a
+		/// TC server can report it to the client (ISO 11783-10 Object Pool Activate response)
+		/// @returns The ID of the object that could not be parsed, or NULL_OBJECT_ID if the last parse succeeded
+		/// or the object header itself was incomplete
+		std::uint16_t get_deserialization_failure_object_id() const;
+
+		/// @brief Returns how many Device (DVC) objects the last deserialize_binary_object_pool() read.
+		/// Only the last one is kept; more than one is worth reporting to the operator.
+		/// @returns The number of DVC objects in the last parsed binary DDOP
+		std::uint16_t get_deserialized_device_object_count() const;
+
 		std::shared_ptr<task_controller_object::Object> get_object_by_id(std::uint16_t objectID);
 
 		/// @brief Gets an object from the DDOP by index based on object creation
@@ -212,6 +223,8 @@ namespace isobus
 
 		std::vector<std::shared_ptr<task_controller_object::Object>> objectList; ///< Maintains a list of all added objects
 		std::uint8_t taskControllerCompatibilityLevel = MAX_TC_VERSION_SUPPORTED; ///< Stores the max TC version
+		std::uint16_t deserializationFailureObjectID = 0xFFFF; ///< Object where the last binary parse stopped (0xFFFF: none)
+		std::uint16_t deserializedDeviceObjects = 0; ///< DVC objects read by the last binary parse
 	};
 } // namespace isobus
 
