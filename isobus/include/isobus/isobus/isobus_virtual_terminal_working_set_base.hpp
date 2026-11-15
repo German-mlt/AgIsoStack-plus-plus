@@ -13,6 +13,9 @@
 #include "isobus/isobus/isobus_virtual_terminal_objects.hpp"
 
 #include <mutex>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace isobus
 {
@@ -21,6 +24,37 @@ namespace isobus
 	class VirtualTerminalWorkingSetBase
 	{
 	public:
+		/// @brief How the parser treats an invalid value inside an object whose length is known
+		enum class ParsePolicy : std::uint8_t
+		{
+			Strict, ///< Reject the object pool (default)
+			Tolerant ///< Substitute a safe value or leave the object undrawable, record a ParseIssue and keep parsing
+		};
+
+		/// @brief Something the tolerant parser accepted instead of rejecting the object pool
+		struct ParseIssue
+		{
+			std::uint16_t objectID; ///< The object that carried the invalid value
+			std::uint8_t objectType; ///< Its object type
+			std::string description; ///< What was invalid and what the parser did instead
+		};
+
+		/// @brief Selects how invalid values are treated. Truncated data, unknown object types,
+		/// more than one Working Set object and invalid auxiliary control objects are always rejected.
+		/// @param[in] policy The parse policy to use from the next parsed object on
+		void set_parse_policy(ParsePolicy policy);
+
+		/// @brief Returns the parse policy
+		/// @returns The parse policy
+		ParsePolicy get_parse_policy() const;
+
+		/// @brief Returns what the tolerant parser accepted since the last clear_parse_issues()
+		/// @returns The accepted issues, in parse order
+		std::vector<ParseIssue> get_parse_issues() const;
+
+		/// @brief Forgets the recorded parse issues, for example before parsing a new object pool
+		void clear_parse_issues();
+
 		/// @brief Takes a raw block of IOP data and parses it into VT objects
 		/// @param[in] iopData A pointer to the raw IOP data
 		/// @param[in] iopLength The length of the raw IOP data
@@ -122,6 +156,19 @@ namespace isobus
 		std::uint8_t faultingObjectType = 0xFF; ///< Type from the failing raw object header
 		std::uint16_t selectedColourMap = NULL_OBJECT_ID; ///< Active per-Working-Set colour remapping
 		std::uint16_t selectedColourPalette = NULL_OBJECT_ID; ///< Active VT6 Working Set palette
+
+	private:
+		/// @brief In tolerant mode, records an accepted issue
+		/// @param[in] objectID The object that carried the invalid value
+		/// @param[in] objectType Its object type
+		/// @param[in] description What was invalid and what is done instead
+		/// @returns true when the parser should continue (tolerant), false to reject (strict)
+		bool tolerate(std::uint16_t objectID, VirtualTerminalObjectType objectType, const std::string &description) const;
+
+		ParsePolicy parsePolicy = ParsePolicy::Strict; ///< How invalid values are treated
+		mutable std::mutex parseIssuesMutex; ///< Protects parseIssues (written by the parsing thread)
+		mutable std::vector<ParseIssue> parseIssues; ///< What the tolerant parser accepted
+		std::set<std::uint16_t> parsedObjectIDs; ///< Object IDs seen in the current parse_iop_into_objects call
 	};
 } // namespace isobus
 #endif // ISOBUS_VIRTUAL_TERMINAL_WORKING_SET_BASE_HPP

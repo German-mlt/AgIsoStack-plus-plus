@@ -298,6 +298,16 @@ namespace isobus
 		return onFocusObjectEventDispatcher;
 	}
 
+	void VirtualTerminalServer::set_object_pool_parse_policy(VirtualTerminalWorkingSetBase::ParsePolicy policy)
+	{
+		objectPoolParsePolicy = policy;
+	}
+
+	VirtualTerminalWorkingSetBase::ParsePolicy VirtualTerminalServer::get_object_pool_parse_policy() const
+	{
+		return objectPoolParsePolicy;
+	}
+
 	LanguageCommandInterface &VirtualTerminalServer::get_language_command_interface()
 	{
 		return languageCommandInterface;
@@ -365,6 +375,7 @@ namespace isobus
                 message.get_destination_control_function() == serverInternalControlFunction)
             {
                 auto ws = std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function());
+                ws->set_parse_policy(objectPoolParsePolicy);
                 ws->set_version(2);
                 ws->set_working_set_maintenance_message_timestamp_ms(SystemTiming::get_timestamp_ms());
                 managedWorkingSetList.push_back(ws);
@@ -375,6 +386,7 @@ namespace isobus
 			{
 				// This CF is probably trying to initiate communication with us.
 				auto workingSet = std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function());
+				workingSet->set_parse_policy(objectPoolParsePolicy);
 				// Publish a fully initialized session. The application's timeout
 				// polling must never observe the default timestamp (zero) and retire
 				// a freshly received initiating maintenance message as expired.
@@ -2910,6 +2922,7 @@ namespace isobus
 			{
 				server->managedWorkingSetList.emplace_back(std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function()));
 				workingSet = std::prev(server->managedWorkingSetList.end());
+				(*workingSet)->set_parse_policy(server->objectPoolParsePolicy);
 			}
 			(*workingSet)->configure_members(count);
 		}

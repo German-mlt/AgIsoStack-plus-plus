@@ -389,6 +389,16 @@ namespace isobus
 		/// @returns The language command interface for the server
 		LanguageCommandInterface &get_language_command_interface();
 
+		/// @brief Selects how object pools of new Working Sets are parsed. Strict (the default)
+		/// rejects a pool with any invalid value; Tolerant substitutes safe values where the
+		/// object length is known and records the issues (see VirtualTerminalWorkingSetBase).
+		/// @param[in] policy The parse policy for Working Sets that connect from now on
+		void set_object_pool_parse_policy(VirtualTerminalWorkingSetBase::ParsePolicy policy);
+
+		/// @brief Returns the parse policy applied to new Working Sets
+		/// @returns The parse policy applied to new Working Sets
+		VirtualTerminalWorkingSetBase::ParsePolicy get_object_pool_parse_policy() const;
+
 	protected:
 		virtual void on_colour_table_changed(
 		  std::shared_ptr<VirtualTerminalServerManagedWorkingSet>,
@@ -925,6 +935,7 @@ namespace isobus
 		LanguageCommandInterface languageCommandInterface; ///< The language command interface for the server
 		std::shared_ptr<InternalControlFunction> serverInternalControlFunction; ///< The internal control function for the server
 		std::vector<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>> managedWorkingSetList; ///< The list of managed working sets
+		VirtualTerminalWorkingSetBase::ParsePolicy objectPoolParsePolicy = VirtualTerminalWorkingSetBase::ParsePolicy::Strict; ///< Applied to each new Working Set
 		std::map<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, bool> managedWorkingSetIopLoadStateMap; ///< A map to hold the IOP load state per session
 		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> activeWorkingSet; ///< The active working set
 		std::uint32_t statusMessageTimestamp_ms = 0; ///< The timestamp of the last status message sent

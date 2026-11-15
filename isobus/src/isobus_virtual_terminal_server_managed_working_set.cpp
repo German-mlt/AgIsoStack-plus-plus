@@ -273,6 +273,7 @@ namespace isobus
 			bool lSuccess = true;
 
 			set_object_pool_processing_state(ObjectPoolProcessingThreadState::Running);
+			clear_parse_issues(); // Each parse reports only its own issues.
 			LOG_INFO("[WS]: Beginning parsing of object pool. This pool has " +
 			         isobus::to_string(static_cast<int>(iopFilesRawData.size())) +
 			         " IOP components.");

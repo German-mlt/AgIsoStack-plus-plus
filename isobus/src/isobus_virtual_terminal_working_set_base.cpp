@@ -187,12 +187,56 @@ namespace isobus
 		return vtObjectTree;
 	}
 
+	void VirtualTerminalWorkingSetBase::set_parse_policy(ParsePolicy policy)
+	{
+		parsePolicy = policy;
+	}
+
+	VirtualTerminalWorkingSetBase::ParsePolicy VirtualTerminalWorkingSetBase::get_parse_policy() const
+	{
+		return parsePolicy;
+	}
+
+	std::vector<VirtualTerminalWorkingSetBase::ParseIssue> VirtualTerminalWorkingSetBase::get_parse_issues() const
+	{
+		const std::lock_guard<std::mutex> lock(parseIssuesMutex);
+		return parseIssues;
+	}
+
+	void VirtualTerminalWorkingSetBase::clear_parse_issues()
+	{
+		const std::lock_guard<std::mutex> lock(parseIssuesMutex);
+		parseIssues.clear();
+	}
+
+	bool VirtualTerminalWorkingSetBase::tolerate(std::uint16_t objectID, VirtualTerminalObjectType objectType, const std::string &description) const
+	{
+		if (ParsePolicy::Tolerant != parsePolicy)
+		{
+			return false;
+		}
+		LOG_WARNING("[WS]: Accepted object " + isobus::to_string(static_cast<int>(objectID)) + ": " + description);
+		const std::lock_guard<std::mutex> lock(parseIssuesMutex);
+		constexpr std::size_t MAX_RECORDED_ISSUES = 1024; // Bounds memory for a pool full of invalid values
+		if (parseIssues.size() < MAX_RECORDED_ISSUES)
+		{
+			parseIssues.push_back({ objectID, static_cast<std::uint8_t>(objectType), description });
+		}
+		return true;
+	}
+
 	bool VirtualTerminalWorkingSetBase::add_or_replace_object(std::shared_ptr<VTObject> objectToAdd)
 	{
 		bool retVal = false;
 
 		if (nullptr != objectToAdd)
 		{
+			// Object IDs shall be unique in a pool (ISO 11783-6 B.1). The last one wins, as before;
+			// a later object pool transfer may still replace objects of an earlier one.
+			if (!parsedObjectIDs.insert(objectToAdd->get_id()).second)
+			{
+				(void)tolerate(objectToAdd->get_id(), objectToAdd->get_object_type(), "duplicate object ID in the same object pool; the last definition is used");
+			}
 			vtObjectTree[objectToAdd->get_id()] = objectToAdd;
 			retVal = true;
 		}
@@ -351,12 +395,31 @@ namespace isobus
 						tempObject->set_background_color(iopData[3]);
 						tempObject->set_soft_key_mask(get_little_endian_uint16(iopData, 4));
 
-						if (iopData[6] <= static_cast<std::uint8_t>(AlarmMask::Priority::Low))
+						// Tolerant: an undefined priority or acoustic signal becomes the most
+						// prominent one, so the alarm is never hidden or silenced by mistake.
+						std::uint8_t priority = iopData[6];
+						if ((priority > static_cast<std::uint8_t>(AlarmMask::Priority::Low)) &&
+						    tolerate(decodedID, decodedType, "undefined alarm priority " + isobus::to_string(static_cast<int>(priority)) + "; High is used"))
 						{
-							tempObject->set_mask_priority(static_cast<AlarmMask::Priority>(iopData[6]));
+							priority = static_cast<std::uint8_t>(AlarmMask::Priority::High);
+						}
+						std::uint8_t acousticSignal = iopData[7];
+						if ((acousticSignal > static_cast<std::uint8_t>(AlarmMask::AcousticSignal::None)) &&
+						    tolerate(decodedID, decodedType, "undefined acoustic signal " + isobus::to_string(static_cast<int>(acousticSignal)) + "; Highest priority is used"))
+						{
+							acousticSignal = static_cast<std::uint8_t>(AlarmMask::AcousticSignal::Highest);
+						}
 
-							if (iopData[7] <= static_cast<std::uint8_t>(AlarmMask::AcousticSignal::None))
+						if (priority <= static_cast<std::uint8_t>(AlarmMask::Priority::Low))
+						{
+							tempObject->set_mask_priority(static_cast<AlarmMask::Priority>(priority));
+
+							if (acousticSignal <= static_cast<std::uint8_t>(AlarmMask::AcousticSignal::None))
 							{
+								// The pool's acoustic signal was validated but never stored, so every alarm
+								// sounded with the default (Highest), even when the pool asked for None.
+								tempObject->set_signal_priority(static_cast<AlarmMask::AcousticSignal>(acousticSignal));
+
 								// Now add child objects
 								const std::uint8_t childrenToFollow = iopData[8];
 								const auto sizeOfChildren = static_cast<std::uint16_t>(childrenToFollow * 6); // ID, X, Y 2 bytes each
@@ -493,7 +556,11 @@ namespace isobus
 						if (iopData[5] > 18)
 						{
 							LOG_ERROR("[WS]: Unknown window mask type for object %u. Allowed range is 1-18.", decodedID);
-							retVal = false;
+							retVal = tolerate(decodedID, decodedType, "undefined window mask type " + isobus::to_string(static_cast<int>(iopData[5])) + "; Freeform is used");
+							if (retVal)
+							{
+								tempObject->set_window_type(WindowMask::WindowType::Freeform);
+							}
 						}
 						else
 						{
@@ -786,11 +853,15 @@ namespace isobus
 
 						if (iopLength >= iopLengthRemaining)
 						{
-							if (numberChildrenToFollow <= KeyGroup::MAX_CHILD_KEYS)
+							if ((numberChildrenToFollow <= KeyGroup::MAX_CHILD_KEYS) ||
+							    tolerate(decodedID, decodedType, "key group with " + isobus::to_string(static_cast<int>(numberChildrenToFollow)) + " keys; only the first " + isobus::to_string(static_cast<int>(KeyGroup::MAX_CHILD_KEYS)) + " are used"))
 							{
 								for (std::uint_fast8_t i = 0; i < numberChildrenToFollow; i++)
 								{
-									tempObject->add_child(get_little_endian_uint16(iopData, 0), 0, 0);
+									if (i < KeyGroup::MAX_CHILD_KEYS)
+									{
+										tempObject->add_child(get_little_endian_uint16(iopData, 0), 0, 0);
+									}
 									iopLength -= 2;
 									iopData += 2;
 								}
@@ -1203,6 +1274,7 @@ namespace isobus
 						else
 						{
 							LOG_ERROR("[WS]: Unknown output line direction in object %u", decodedID);
+							(void)tolerate(decodedID, decodedType, "undefined line direction " + isobus::to_string(static_cast<int>(iopData[9])) + "; top left to bottom right is used");
 						}
 
 						iopData += 10;
@@ -1272,9 +1344,16 @@ namespace isobus
 						tempObject->set_width(get_little_endian_uint16(iopData, 5));
 						tempObject->set_height(get_little_endian_uint16(iopData, 7));
 
-						if (iopData[9] <= static_cast<std::uint8_t>(OutputEllipse::EllipseType::ClosedEllipseSection))
+						std::uint8_t ellipseType = iopData[9];
+						if ((ellipseType > static_cast<std::uint8_t>(OutputEllipse::EllipseType::ClosedEllipseSection)) &&
+						    tolerate(decodedID, decodedType, "undefined ellipse type " + isobus::to_string(static_cast<int>(ellipseType)) + "; Closed is used"))
 						{
-							tempObject->set_ellipse_type(static_cast<OutputEllipse::EllipseType>(iopData[9]));
+							ellipseType = static_cast<std::uint8_t>(OutputEllipse::EllipseType::Closed);
+						}
+
+						if (ellipseType <= static_cast<std::uint8_t>(OutputEllipse::EllipseType::ClosedEllipseSection))
+						{
+							tempObject->set_ellipse_type(static_cast<OutputEllipse::EllipseType>(ellipseType));
 							tempObject->set_start_angle(iopData[10]);
 							tempObject->set_end_angle(iopData[11]);
 							tempObject->set_fill_attributes(get_little_endian_uint16(iopData, 12));
@@ -1317,9 +1396,16 @@ namespace isobus
 						tempObject->set_line_attributes(get_little_endian_uint16(iopData, 7));
 						tempObject->set_fill_attributes(get_little_endian_uint16(iopData, 9));
 
-						if (iopData[11] <= 3)
+						std::uint8_t polygonType = iopData[11];
+						if ((polygonType > 3) &&
+						    tolerate(decodedID, decodedType, "undefined polygon type " + isobus::to_string(static_cast<int>(polygonType)) + "; Complex is used"))
 						{
-							tempObject->set_type(static_cast<OutputPolygon::PolygonType>(iopData[11]));
+							polygonType = static_cast<std::uint8_t>(OutputPolygon::PolygonType::Complex);
+						}
+
+						if (polygonType <= 3)
+						{
+							tempObject->set_type(static_cast<OutputPolygon::PolygonType>(polygonType));
 
 							const std::uint8_t numberOfPoints = iopData[12];
 							const std::uint8_t numberOfMacrosToFollow = iopData[13];
@@ -1558,7 +1644,25 @@ namespace isobus
 						tempObject->set_actual_height(get_little_endian_uint16(iopData, 7));
 						tempObject->set_height(static_cast<std::uint16_t>(tempObject->get_actual_height() * (static_cast<float>(tempObject->get_width()) / static_cast<float>(tempObject->get_actual_width()))));
 
-						if (iopData[9] <= static_cast<std::uint8_t>(PictureGraphic::Format::EightBitColour))
+						// The raw data length is in the header, so a picture whose pixels cannot be
+						// decoded can be skipped. It stays in the pool without pixels (not drawn), so
+						// the objects that reference it still resolve.
+						const std::uint32_t rawDataBytes = get_little_endian_uint32(iopData, 12);
+						const bool undefinedFormat = iopData[9] > static_cast<std::uint8_t>(PictureGraphic::Format::EightBitColour);
+						const bool oddRunLengthData = (0 != (iopData[10] & (1U << static_cast<std::uint8_t>(PictureGraphic::Options::RunLengthEncoded)))) &&
+						  (0 != (rawDataBytes % 2));
+						if ((undefinedFormat || oddRunLengthData) &&
+						    (iopLength >= 17U + rawDataBytes) &&
+						    tolerate(decodedID, decodedType, undefinedFormat ? ("undefined picture format " + isobus::to_string(static_cast<int>(iopData[9])) + "; not drawn") : "run-length data with an odd number of bytes; not drawn"))
+						{
+							tempObject->set_options(iopData[10] & static_cast<std::uint8_t>(~(1U << static_cast<std::uint8_t>(PictureGraphic::Options::RunLengthEncoded))));
+							tempObject->set_transparency_colour(iopData[11]);
+							const std::uint8_t numberOfMacrosToFollow = iopData[16];
+							iopData += 17U + rawDataBytes;
+							iopLength -= 17U + rawDataBytes;
+							retVal = parse_object_macro_reference(tempObject, numberOfMacrosToFollow, iopData, iopLength);
+						}
+						else if (iopData[9] <= static_cast<std::uint8_t>(PictureGraphic::Format::EightBitColour))
 						{
 							tempObject->set_format(static_cast<PictureGraphic::Format>(iopData[9]));
 							tempObject->set_options(iopData[10]);
@@ -1824,11 +1928,21 @@ namespace isobus
 						tempObject->set_colour(iopData[3]);
 						tempObject->set_size(static_cast<FontAttributes::FontSize>(iopData[4]));
 
-						if ((iopData[5] <= static_cast<std::uint8_t>(FontAttributes::FontType::ISO8859_7)) &&
-						    (iopData[5] != static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_1)) &&
-						    (iopData[5] != static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_2)))
+						std::uint8_t fontType = iopData[5];
+						const bool knownFontType = (fontType <= static_cast<std::uint8_t>(FontAttributes::FontType::ISO8859_7)) &&
+						  (fontType != static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_1)) &&
+						  (fontType != static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_2));
+						if (!knownFontType &&
+						    tolerate(decodedID, decodedType, "proprietary or reserved font type " + isobus::to_string(static_cast<int>(fontType)) + "; ISO 8859-1 is used"))
 						{
-							tempObject->set_type(static_cast<FontAttributes::FontType>(iopData[5]));
+							fontType = static_cast<std::uint8_t>(FontAttributes::FontType::ISO8859_1);
+						}
+
+						if ((fontType <= static_cast<std::uint8_t>(FontAttributes::FontType::ISO8859_7)) &&
+						    (fontType != static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_1)) &&
+						    (fontType != static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_2)))
+						{
+							tempObject->set_type(static_cast<FontAttributes::FontType>(fontType));
 							tempObject->set_style(iopData[6]);
 
 							const std::uint8_t numberOfMacrosToFollow = iopData[7];
@@ -1891,9 +2005,16 @@ namespace isobus
 					{
 						tempObject->set_id(decodedID);
 
-						if (iopData[3] <= static_cast<std::uint8_t>(FillAttributes::FillType::FillWithPatternGivenByFillPatternAttribute))
+						std::uint8_t fillType = iopData[3];
+						if ((fillType > static_cast<std::uint8_t>(FillAttributes::FillType::FillWithPatternGivenByFillPatternAttribute)) &&
+						    tolerate(decodedID, decodedType, "undefined fill type " + isobus::to_string(static_cast<int>(fillType)) + "; no fill is used"))
 						{
-							tempObject->set_type(static_cast<FillAttributes::FillType>(iopData[3]));
+							fillType = static_cast<std::uint8_t>(FillAttributes::FillType::NoFill);
+						}
+
+						if (fillType <= static_cast<std::uint8_t>(FillAttributes::FillType::FillWithPatternGivenByFillPatternAttribute))
+						{
+							tempObject->set_type(static_cast<FillAttributes::FillType>(fillType));
 							tempObject->set_background_color(iopData[4]);
 							tempObject->set_fill_pattern(get_little_endian_uint16(iopData, 5)); // Object ID for a picture graphic
 
@@ -2069,6 +2190,16 @@ namespace isobus
 						else
 						{
 							LOG_ERROR("[WS]: Colour map with invalid number of indexes: %d", numberOfIndexes);
+							// Its length is still known: skip it. References to it stay unresolved,
+							// so the Working Set keeps the default colours.
+							if ((iopLength >= static_cast<std::uint32_t>(5 + numberOfIndexes)) &&
+							    tolerate(decodedID, decodedType, "colour map with " + isobus::to_string(static_cast<int>(numberOfIndexes)) + " indexes (2, 16 or 256 allowed); ignored"))
+							{
+								iopData += 5 + numberOfIndexes;
+								iopLength -= 5 + numberOfIndexes;
+								retVal = true; // Parsed past it, but not added to the object tree.
+								break;
+							}
 						}
 					}
 					else
@@ -2282,6 +2413,8 @@ namespace isobus
 						std::uint16_t numberBytesProcessed = 0;
 						iopLength -= 5;
 						iopData += 5;
+						std::uint8_t *const macroEnd = iopData + numberBytesToFollow;
+						const std::uint32_t lengthAfterMacro = iopLength - numberBytesToFollow;
 
 						if (iopLength >= numberBytesToFollow)
 						{
@@ -2357,6 +2490,20 @@ namespace isobus
 								{
 									LOG_ERROR("[WS]: Macro object %u contains malformed commands", decodedID);
 								}
+							}
+
+							// Its length is known: keep it without commands (it does nothing when
+							// triggered) and continue right after it.
+							if (!retVal &&
+							    tolerate(decodedID, decodedType, "macro with invalid or malformed commands; it runs no command"))
+							{
+								while (tempObject->get_number_of_commands() > 0)
+								{
+									(void)tempObject->remove_command_packet(0);
+								}
+								iopData = macroEnd;
+								iopLength = lengthAfterMacro;
+								retVal = true;
 							}
 						}
 						else
@@ -2757,6 +2904,7 @@ namespace isobus
 			faultingObjectID = NULL_OBJECT_ID;
 			faultingObjectType = 0xFF;
 		}
+		parsedObjectIDs.clear();
 
 		if (iopLength > 0)
 		{
@@ -2842,7 +2990,10 @@ namespace isobus
 					          macroID,
 					          object->get_id(),
 					          iopData[2]);
-					return false;
+					if (!tolerate(object->get_id(), object->get_object_type(), "macro " + isobus::to_string(static_cast<int>(macroID)) + " with an undefined event " + isobus::to_string(static_cast<int>(iopData[2])) + "; reference ignored"))
+					{
+						return false;
+					}
 				}
 				iopLength -= 4;
 				iopData += 4;
@@ -2867,7 +3018,10 @@ namespace isobus
 					          iopData[1],
 					          object->get_id(),
 					          iopData[0]);
-					return false;
+					if (!tolerate(object->get_id(), object->get_object_type(), "macro " + isobus::to_string(static_cast<int>(iopData[1])) + " with an undefined event " + isobus::to_string(static_cast<int>(iopData[0])) + "; reference ignored"))
+					{
+						return false;
+					}
 				}
 				iopLength -= 2;
 				iopData += 2;
